@@ -143,6 +143,7 @@ initMobileAppDeepLinks();
         if (typeof renderBlogPosts === 'function') renderBlogPosts();
         if (typeof populatePostSelect === 'function') populatePostSelect();
         if (typeof renderAdminPostsList === 'function') renderAdminPostsList();
+        if (typeof checkPendingSharedDeepLink === 'function') checkPendingSharedDeepLink();
       }
     }
     window.reconcileAndMergePosts = reconcileAndMergePosts;
@@ -244,8 +245,28 @@ initMobileAppDeepLinks();
 let easterEggModulePromise = null;
 let easterEggModuleRef = null;
 let gestureUnlockAudioCtx = null;
+let escalerasUrlWarmupStarted = false;
+const FALLBACK_ESCALERAS_AUDIO_URL = "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/ec/fb/45/ecfb4526-93d2-03e7-c901-a297111f1458/mzaf_14659704648749163645.plus.aac.p.m4a";
+
+function warmUpEscalerasStreamUrlOnce() {
+  if (escalerasUrlWarmupStarted) return;
+  escalerasUrlWarmupStarted = true;
+  try {
+    if (sessionStorage.getItem("blutu_escaleras_audio_url")) return;
+  } catch (e) {}
+  fetch("https://itunes.apple.com/lookup?id=6773560493&entity=song", { mode: "cors", credentials: "omit" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const hit = data && Array.isArray(data.results) ? data.results.find((it) => it && it.previewUrl) : null;
+      if (hit && hit.previewUrl) {
+        try { sessionStorage.setItem("blutu_escaleras_audio_url", hit.previewUrl); } catch (e) {}
+      }
+    })
+    .catch(() => {});
+}
 
 function preloadEasterEggModule() {
+  warmUpEscalerasStreamUrlOnce();
   if (!easterEggModulePromise) {
     easterEggModulePromise = import("./easter-egg.js").then((mod) => {
       easterEggModuleRef = mod;
@@ -261,28 +282,50 @@ function preloadEasterEggModule() {
 
 function primeSynchronousGestureAudio() {
   try {
+    if (navigator.audioSession && navigator.audioSession.type !== "playback") {
+      navigator.audioSession.type = "playback";
+    }
+  } catch (e) {}
+  try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (AudioCtx) {
-      if (!gestureUnlockAudioCtx) gestureUnlockAudioCtx = new AudioCtx();
-      if (gestureUnlockAudioCtx.state === "suspended") gestureUnlockAudioCtx.resume();
+      if (!gestureUnlockAudioCtx || gestureUnlockAudioCtx.state === "closed") {
+        gestureUnlockAudioCtx = new AudioCtx();
+      }
+      if (gestureUnlockAudioCtx.state === "suspended") {
+        gestureUnlockAudioCtx.resume().catch(() => {});
+      }
+      const buf = gestureUnlockAudioCtx.createBuffer(1, 1, 22050);
+      const src = gestureUnlockAudioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(gestureUnlockAudioCtx.destination);
+      src.start(0);
     }
   } catch (e) {}
   try {
     if (!window.__blutuPrimedGestureAudio) {
-      const a = new Audio();
-      a.id = "blutu-direct-audio";
+      let streamUrl = FALLBACK_ESCALERAS_AUDIO_URL;
+      try {
+        const cached = sessionStorage.getItem("blutu_escaleras_audio_url");
+        if (cached && /^https:\/\//i.test(cached)) streamUrl = cached;
+      } catch (e) {}
+      const a = document.createElement("audio");
+      a.id = "blutu-shared-direct-audio";
+      a.preload = "auto";
       a.loop = true;
       a.playsInline = true;
       a.setAttribute("playsinline", "");
       a.setAttribute("webkit-playsinline", "");
-      a.muted = true;
-      a.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
-      const p = a.play();
-      if (p && typeof p.then === "function") {
-        p.then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
-      } else {
-        a.pause();
-        a.muted = false;
+      a.style.display = "none";
+      a.volume = 0.88;
+      a.muted = Boolean(window.__blutuSharedMusicMuted);
+      a.src = streamUrl;
+      if (document.body) {
+        document.body.appendChild(a);
+      }
+      if (!a.muted) {
+        const p = a.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
       }
       window.__blutuPrimedGestureAudio = a;
     }
@@ -313,6 +356,7 @@ let gamesEngineModulePromise = null;
 let gamesEngineModuleRef = null;
 
 function ensureGamesEngineLoaded() {
+  warmUpEscalerasStreamUrlOnce();
   if (!gamesEngineModulePromise) {
     gamesEngineModulePromise = import("./games-engine.js").then((mod) => {
       gamesEngineModuleRef = mod;
@@ -333,6 +377,11 @@ function destroyActiveMiniGame() {
 }
 
 function launchMiniGameFromBlog(gameType, mode) {
+  if (gamesEngineModuleRef && typeof gamesEngineModuleRef.launchMiniGameFromBlog === "function") {
+    gamesEngineModuleRef.launchMiniGameFromBlog(gameType, mode);
+    return;
+  }
+  primeSynchronousGestureAudio();
   ensureGamesEngineLoaded().then((mod) => {
     if (mod && typeof mod.launchMiniGameFromBlog === "function") {
       mod.launchMiniGameFromBlog(gameType, mode);
@@ -835,11 +884,19 @@ try {
     let activeModalHistoryName = null;
     let isModalClosingProgrammatically = false;
 
-    function pushModalState(modalName) {
-      if (activeModalHistoryName === modalName) return;
+    function pushModalState(modalName, customPath) {
+      const targetUrl = customPath || (window.location.pathname + window.location.search + window.location.hash);
+      if (activeModalHistoryName === modalName) {
+        if (customPath) {
+          try {
+            window.history.replaceState({ blutuModal: modalName }, '', targetUrl);
+          } catch (e) {}
+        }
+        return;
+      }
       activeModalHistoryName = modalName;
       try {
-        window.history.pushState({ blutuModal: modalName }, '', window.location.href);
+        window.history.pushState({ blutuModal: modalName }, '', targetUrl);
       } catch (e) {}
     }
 
@@ -851,7 +908,11 @@ try {
           try {
             window.history.back();
           } catch (e) {}
+          return;
         }
+      }
+      if (typeof clearSharedQueryParamsFromUrl === 'function') {
+        clearSharedQueryParamsFromUrl();
       }
     }
 
@@ -892,7 +953,7 @@ try {
           if (typeof destroyActiveMiniGame === 'function') destroyActiveMiniGame();
           window.__isMiniGameScreenOpen = false;
           openGameBlogModal(returnGameKey);
-          pushModalState('blog');
+          pushModalState('blog', '/' + getGameBlogShareSlug(returnGameKey));
           return;
         }
         if (typeof resetBlogParagraphRevealState === 'function') {
@@ -907,6 +968,7 @@ try {
         currentGameBlogKey = null;
         blogModal.style.display = 'none';
         document.body.style.overflow = '';
+        if (typeof clearSharedQueryParamsFromUrl === 'function') clearSharedQueryParamsFromUrl();
       }
 
       // 2. Cerrar visor de imagen / video de Galería
@@ -927,6 +989,7 @@ try {
         if (typeof clearModalSlideshowInterval === 'function') clearModalSlideshowInterval();
         merchModal.style.display = 'none';
         document.body.style.overflow = '';
+        if (typeof clearSharedQueryParamsFromUrl === 'function') clearSharedQueryParamsFromUrl();
       }
 
       // 4. Cerrar modal de Carrito de compras
@@ -1703,8 +1766,9 @@ try {
             ${bodyHTML}
           </div>
 
-          <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 30px;">
+          <div class="blog-modal-bottom-actions" contenteditable="false">
             <button type="button" class="read-more-btn" onclick="finishInlineBlogEdit()">Volver</button>
+            <button type="button" class="read-more-btn blog-share-btn" onclick="shareCurrentBlog()" title="Compartir este blog"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
           </div>
         `;
 
@@ -1722,8 +1786,9 @@ try {
             </figure>
           ` : ''}
           ${formattedContentHTML}
-          <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 30px;">
-            <button class="read-more-btn" onclick="closeBlogModal()">Volver</button>
+          <div class="blog-modal-bottom-actions">
+            <button type="button" class="read-more-btn" onclick="closeBlogModal()">Volver</button>
+            <button type="button" class="read-more-btn blog-share-btn" onclick="shareCurrentBlog()" title="Compartir este blog"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
           </div>
         `;
       }
@@ -1732,7 +1797,7 @@ try {
 
       document.getElementById('blogReadModal').style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      pushModalState('blog');
+      pushModalState('blog', '/' + getBlogPostShareSlug(post, postIndex));
       if (modalBox) modalBox.scrollTop = 0;
 
       applyBlogModalAdaptiveTheme(post, modalBody);
@@ -1746,6 +1811,67 @@ try {
           if (titleEl) titleEl.focus();
         }, 80);
       }
+    }
+
+    const OFFICIAL_BLUTU_ORIGIN = 'https://blutu.org';
+
+    function buildCleanShareSlug(rawText, fallbackPrefix = 'pensamiento') {
+      const str = String(rawText || '').trim();
+      if (!str) return fallbackPrefix;
+
+      const ascii = str
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      if (ascii) return ascii;
+
+      const codeHex = Array.from(str)
+        .filter((ch) => ch.trim() !== '')
+        .slice(0, 4)
+        .map((ch) => (ch.codePointAt(0) || 0).toString(16))
+        .join('-');
+
+      return codeHex ? `${fallbackPrefix}-${codeHex}` : fallbackPrefix;
+    }
+
+    function getBlogPostShareSlug(post, fallbackIndex = 0) {
+      if (!post) return `pensamiento-${fallbackIndex}`;
+      return buildCleanShareSlug(post.title || post.id || `pensamiento-${fallbackIndex}`, 'pensamiento');
+    }
+
+    function getGameBlogShareSlug(gameKey) {
+      if (gameKey === 'why') return 'por-que';
+      if (gameKey === 'memorama') return 'memorama';
+      if (gameKey === 'sixbysix') return '6x6';
+      const gPost = gamesData && gamesData.blogs && gamesData.blogs[gameKey];
+      return buildCleanShareSlug((gPost && gPost.title) || gameKey, 'juego');
+    }
+
+    function getMerchItemShareSlug(item, realIdx = 0) {
+      const inner = buildCleanShareSlug((item && (item.name || item.id)) || String(realIdx), 'item');
+      return inner.startsWith('merch-') ? inner : `merch-${inner}`;
+    }
+
+    function clearSharedQueryParamsFromUrl() {
+      try {
+        if (!window.location) return;
+        const params = new URLSearchParams(window.location.search || '');
+        const hasShareQuery = params.has('s') || params.has('blog') || params.has('juego') || params.has('merch');
+        const pathClean = String(window.location.pathname || '/').replace(/^\/+|\/+$/g, '');
+        const hasSlugPath = Boolean(pathClean && pathClean !== 'index.html' && pathClean !== '404.html');
+        if (!hasShareQuery && !hasSlugPath) return;
+
+        params.delete('s');
+        params.delete('blog');
+        params.delete('juego');
+        params.delete('merch');
+        const nextQuery = params.toString();
+        const nextUrl = '/' + (nextQuery ? `?${nextQuery}` : '') + (window.location.hash || '');
+        window.history.replaceState(null, '', nextUrl);
+      } catch (e) {}
     }
 
     function closeBlogModal(skipSync = false) {
@@ -1795,26 +1921,237 @@ try {
       document.body.style.overflow = '';
     }
 
+    async function copyShareUrlFallback(urlToCopy, toastMsg) {
+      let copied = false;
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+          await navigator.clipboard.writeText(urlToCopy);
+          copied = true;
+        } catch (e) {
+          copied = false;
+        }
+      }
+      if (!copied) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = urlToCopy;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          ta.setSelectionRange(0, urlToCopy.length);
+          copied = document.execCommand('copy');
+          ta.remove();
+        } catch (e) {
+          copied = false;
+        }
+      }
+      if (copied && typeof showToastNotification === 'function') {
+        showToastNotification(toastMsg || `🔗 Copiado: ${urlToCopy}`);
+      }
+    }
+
     async function shareCurrentBlog() {
+      if (isAdminMode && typeof syncLiveBlogModalToMemory === 'function') {
+        syncLiveBlogModalToMemory(false);
+      }
       const post = getActiveEditableBlogPost();
       if (!post) return;
 
-      const shareData = {
-        title: post.title,
-        text: `${post.title} — ${post.date}`,
-        url: window.location.href
-      };
+      const cleanTitle = String(post.title || 'Blutu').trim() || 'Blutu';
+      const slug = currentGameBlogKey
+        ? getGameBlogShareSlug(currentGameBlogKey)
+        : getBlogPostShareSlug(post, currentBlogIndex ?? 0);
+      const shareUrl = `${OFFICIAL_BLUTU_ORIGIN}/${slug}`;
 
-      try {
-        if (navigator.share) {
-          await navigator.share(shareData);
-        } else {
-          const textToCopy = `${shareData.title}\n${shareData.text}\n${shareData.url}`;
-          await navigator.clipboard.writeText(textToCopy);
-          showToastNotification('Enlace y texto copiados para compartir.');
+      if (typeof navigator.share === 'function') {
+        try {
+          await navigator.share({
+            title: cleanTitle,
+            url: shareUrl
+          });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
         }
-      } catch (err) {
-        console.warn('No se pudo compartir:', err);
+      }
+
+      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: blutu.org/${slug}`);
+    }
+
+    async function shareCurrentMerch(realIdx) {
+      const item = merchItemsData && merchItemsData[realIdx];
+      if (!item) return;
+
+      const cleanName = String(item.name || 'Merch Blutu').trim() || 'Merch Blutu';
+      const slug = getMerchItemShareSlug(item, realIdx);
+      const shareUrl = `${OFFICIAL_BLUTU_ORIGIN}/${slug}`;
+
+      if (typeof navigator.share === 'function') {
+        try {
+          await navigator.share({
+            title: cleanName,
+            url: shareUrl
+          });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+
+      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: blutu.org/${slug}`);
+    }
+
+    let hasResolvedInitialSharedDeepLink = false;
+    const initialCapturedDeepLink = (function captureInitialDeepLinkOnce() {
+      try {
+        let routeFromStorage = '';
+        try {
+          routeFromStorage = sessionStorage.getItem('blutu_spa_route') || '';
+          if (routeFromStorage) sessionStorage.removeItem('blutu_spa_route');
+        } catch (e) {}
+
+        const params = new URLSearchParams(window.location.search || '');
+        const sParam = (params.get('s') || '').trim();
+        const gameParam = (params.get('juego') || '').trim();
+        const blogParam = (params.get('blog') || '').trim();
+        const merchParam = (params.get('merch') || '').trim();
+
+        let pathSlug = '';
+        const rawPath = decodeURIComponent(window.location.pathname || '/').replace(/^\/+|\/+$/g, '');
+        if (rawPath && rawPath !== 'index.html' && rawPath !== '404.html') {
+          pathSlug = rawPath;
+        }
+
+        const slug = (sParam || routeFromStorage || pathSlug).replace(/^\/+|\/+$/g, '');
+        return { slug, gameParam, blogParam, merchParam };
+      } catch (e) {
+        return { slug: '', gameParam: '', blogParam: '', merchParam: '' };
+      }
+    })();
+
+    function prepareBaseHomepageHistoryBeforeDeepLink() {
+      try {
+        window.history.replaceState(null, '', '/');
+      } catch (e) {}
+    }
+
+    function checkPendingSharedDeepLink() {
+      if (hasResolvedInitialSharedDeepLink) return;
+      const { slug, gameParam, blogParam, merchParam } = initialCapturedDeepLink;
+      if (!slug && !gameParam && !blogParam && !merchParam) return;
+
+      // 1. Verificar coincidencia con ruta limpia blutu.org/<slug>
+      if (slug) {
+        const cleanLower = slug.toLowerCase();
+        const slugNorm = buildCleanShareSlug(slug, 'pensamiento');
+
+        // 1a. Blogs de Juegos (por-que, memorama, 6x6 o título personalizado)
+        const gameAliases = {
+          'por-que': 'why',
+          'porque': 'why',
+          'why': 'why',
+          'memorama': 'memorama',
+          '6x6': 'sixbysix',
+          'sixbysix': 'sixbysix'
+        };
+        let matchedGameKey = gameAliases[cleanLower] || gameAliases[slugNorm] || null;
+        if (!matchedGameKey && gamesData && gamesData.blogs) {
+          matchedGameKey = ['why', 'memorama', 'sixbysix'].find((k) => {
+            const gp = gamesData.blogs[k];
+            return gp && buildCleanShareSlug(gp.title, 'juego') === slugNorm;
+          }) || null;
+        }
+        if (matchedGameKey && gamesData && gamesData.blogs && gamesData.blogs[matchedGameKey]) {
+          hasResolvedInitialSharedDeepLink = true;
+          prepareBaseHomepageHistoryBeforeDeepLink();
+          openGameBlogModal(matchedGameKey, true);
+          return;
+        }
+
+        // 1b. Productos de Merch (blutu.org/merch-...)
+        if (cleanLower.startsWith('merch-')) {
+          const mList = Array.isArray(merchItemsData) ? merchItemsData : [];
+          const mIdx = mList.findIndex((it, idx) => it && it.visible !== false && getMerchItemShareSlug(it, idx) === cleanLower);
+          if (mIdx !== -1) {
+            hasResolvedInitialSharedDeepLink = true;
+            prepareBaseHomepageHistoryBeforeDeepLink();
+            openMerchDetailModal(mIdx);
+            return;
+          }
+        }
+
+        // 1c. Blogs de Pensamientos (blutu.org/<slug>)
+        const list = Array.isArray(postsData) ? postsData : [];
+        const normRaw = normalizePostStr(slug);
+        const foundIdx = list.findIndex((p, idx) => {
+          if (!p || p.hidden) return false;
+          if (getBlogPostShareSlug(p, idx) === cleanLower || getBlogPostShareSlug(p, idx) === slugNorm) return true;
+          if (String(p.id || '').trim() === slug || String(p.title || '').trim() === slug) return true;
+          return Boolean(normRaw && (normalizePostStr(p.id) === normRaw || normalizePostStr(p.title) === normRaw));
+        });
+        if (foundIdx !== -1) {
+          hasResolvedInitialSharedDeepLink = true;
+          prepareBaseHomepageHistoryBeforeDeepLink();
+          openBlogModal(foundIdx, true);
+          return;
+        }
+      }
+
+      // 2. Compatibilidad con parámetros antiguos (?juego=..., ?blog=..., ?merch=...)
+      if (gameParam) {
+        const gLower = gameParam.toLowerCase();
+        const mappedKey = (gLower === '6x6' || gLower === 'por-que')
+          ? (gLower === '6x6' ? 'sixbysix' : 'why')
+          : gLower;
+        if (gamesData && gamesData.blogs && gamesData.blogs[mappedKey]) {
+          hasResolvedInitialSharedDeepLink = true;
+          prepareBaseHomepageHistoryBeforeDeepLink();
+          openGameBlogModal(mappedKey, true);
+          return;
+        }
+      }
+
+      if (blogParam) {
+        const normTarget = normalizePostStr(blogParam);
+        const slugTarget = buildCleanShareSlug(blogParam, 'pensamiento');
+        const list = Array.isArray(postsData) ? postsData : [];
+        let foundIdx = list.findIndex((p, idx) => p && !p.hidden && (
+          getBlogPostShareSlug(p, idx) === slugTarget ||
+          String(p.id || '').trim() === blogParam ||
+          String(p.title || '').trim() === blogParam ||
+          (normTarget && (normalizePostStr(p.id) === normTarget || normalizePostStr(p.title) === normTarget))
+        ));
+        if (foundIdx === -1 && /^\d+$/.test(blogParam)) {
+          const numIdx = parseInt(blogParam, 10);
+          if (list[numIdx] && !list[numIdx].hidden) foundIdx = numIdx;
+        }
+        if (foundIdx !== -1) {
+          hasResolvedInitialSharedDeepLink = true;
+          prepareBaseHomepageHistoryBeforeDeepLink();
+          openBlogModal(foundIdx, true);
+          return;
+        }
+      }
+
+      if (merchParam) {
+        const normMerch = normalizePostStr(merchParam);
+        const mList = Array.isArray(merchItemsData) ? merchItemsData : [];
+        let mIdx = mList.findIndex((it) => it && it.visible !== false && (
+          String(it.id || '').trim() === merchParam ||
+          String(it.name || '').trim() === merchParam ||
+          (normMerch && (normalizePostStr(it.id) === normMerch || normalizePostStr(it.name) === normMerch))
+        ));
+        if (mIdx === -1 && /^\d+$/.test(merchParam)) {
+          const numIdx = parseInt(merchParam, 10);
+          if (mList[numIdx] && mList[numIdx].visible !== false) mIdx = numIdx;
+        }
+        if (mIdx !== -1) {
+          hasResolvedInitialSharedDeepLink = true;
+          prepareBaseHomepageHistoryBeforeDeepLink();
+          openMerchDetailModal(mIdx);
+        }
       }
     }
 
@@ -2043,7 +2380,10 @@ try {
         return `
           ${adminColorsHTML}
           <div class="game-blog-actions-stack" contenteditable="false">
-            <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+            <div class="game-blog-modes-row">
+              <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+              <button type="button" id="gameBlogShareActionBtn" class="game-custom-btn is-volver-btn blog-share-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="shareCurrentBlog()" title="Compartir este blog"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
+            </div>
           </div>
         `;
       }
@@ -2149,7 +2489,10 @@ try {
               <button type="button" id="memoramaVsPcEasyLaunchBtn" class="game-custom-btn is-submode-btn" style="${computeGameButtonStyleAttr(vsPcEasyHex)}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
               <button type="button" id="memoramaVsPcHardLaunchBtn" class="game-custom-btn is-submode-btn" style="${computeGameButtonStyleAttr(vsPcHardHex)}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
             </div>
-            <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+            <div class="game-blog-modes-row">
+              <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+              <button type="button" id="gameBlogShareActionBtn" class="game-custom-btn is-volver-btn blog-share-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="shareCurrentBlog()" title="Compartir este blog"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
+            </div>
           </div>
         `;
       }
@@ -2197,7 +2540,10 @@ try {
             <button type="button" id="sixEasyLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(easyHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
             <button type="button" id="sixHardLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(hardHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
           </div>
-          <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+          <div class="game-blog-modes-row">
+            <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
+            <button type="button" id="gameBlogShareActionBtn" class="game-custom-btn is-volver-btn blog-share-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="shareCurrentBlog()" title="Compartir este blog"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
+          </div>
         </div>
       `;
     }
@@ -2278,12 +2624,9 @@ try {
 
       syncBlogParagraphFirstLetterColors(modalBody);
 
-      const wasAlreadyOpen = modalEl.style.display === 'flex';
       modalEl.style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      if (!wasAlreadyOpen) {
-        pushModalState('blog');
-      }
+      pushModalState('blog', '/' + getGameBlogShareSlug(gameKey));
       if (modalBox) modalBox.scrollTop = 0;
 
       applyBlogModalAdaptiveTheme(post, modalBody);
@@ -2302,8 +2645,11 @@ try {
           renderGamesSection();
         } else if (propName === 'backBtnColor' && gamesData.blogs && gamesData.blogs.why) {
           gamesData.blogs.why.backBtnColor = cleanHex;
+          const styleAttr = computeGameButtonStyleAttr(cleanHex);
           const btn = document.getElementById('gameBlogBackActionBtn');
-          if (btn) btn.setAttribute('style', computeGameButtonStyleAttr(cleanHex));
+          if (btn) btn.setAttribute('style', styleAttr);
+          const shareBtn = document.getElementById('gameBlogShareActionBtn');
+          if (shareBtn) shareBtn.setAttribute('style', styleAttr);
         }
       } else if (sectionKey === 'memorama') {
         gamesData.memorama[propName] = cleanHex;
@@ -2316,8 +2662,13 @@ try {
         };
         const targetId = mapIds[propName];
         if (targetId) {
+          const styleAttr = computeGameButtonStyleAttr(cleanHex);
           const el = document.getElementById(targetId);
-          if (el) el.setAttribute('style', computeGameButtonStyleAttr(cleanHex));
+          if (el) el.setAttribute('style', styleAttr);
+          if (propName === 'backBtnColor') {
+            const shareBtn = document.getElementById('gameBlogShareActionBtn');
+            if (shareBtn) shareBtn.setAttribute('style', styleAttr);
+          }
         }
       } else if (sectionKey === 'sixbysix') {
         gamesData.sixBySix[propName] = cleanHex;
@@ -2328,8 +2679,13 @@ try {
         };
         const targetId = mapIds[propName];
         if (targetId) {
+          const styleAttr = computeGameButtonStyleAttr(cleanHex);
           const el = document.getElementById(targetId);
-          if (el) el.setAttribute('style', computeGameButtonStyleAttr(cleanHex));
+          if (el) el.setAttribute('style', styleAttr);
+          if (propName === 'backBtnColor') {
+            const shareBtn = document.getElementById('gameBlogShareActionBtn');
+            if (shareBtn) shareBtn.setAttribute('style', styleAttr);
+          }
         }
       }
 
@@ -8449,7 +8805,7 @@ try {
       const modal = document.getElementById('merchDetailModal');
       if (modal) modal.style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      pushModalState('merch');
+      pushModalState('merch', '/' + getMerchItemShareSlug(item, realIdx));
     }
 
     function renderMerchDetailModalContent(realIdx, imgIdx) {
@@ -8502,7 +8858,8 @@ try {
           <p style="font-size: 1.05rem; text-align: justify; margin-top: 18px; color: var(--white); line-height: 1.6;">${escapeHtmlAttr(item.description || '')}</p>
           
           <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 25px;">
-            <button class="read-more-btn" onclick="closeMerchModal()">Volver</button>
+            <button type="button" class="read-more-btn" onclick="closeMerchModal()">Volver</button>
+            <button type="button" class="read-more-btn blog-share-btn" onclick="shareCurrentMerch(${realIdx})" title="Compartir este producto"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
             ${isAgotado ? `
               <button class="read-more-btn" disabled style="background: rgba(60, 15, 15, 0.85); border: 1px solid #ff4d4d; color: #ff9999; cursor: not-allowed; opacity: 0.88; box-shadow: none;">
                 🚫 Agotado
@@ -8607,6 +8964,7 @@ try {
 
         <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 22px;">
           <button type="button" class="read-more-btn" onclick="finishInlineMerchModalEdit()">✓ Listo</button>
+          <button type="button" class="read-more-btn blog-share-btn" onclick="shareCurrentMerch(${realIdx})" title="Compartir este producto"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>Compartir</span></button>
         </div>
       `;
     }
@@ -11293,6 +11651,7 @@ try {
       initCollapsibleSections();
       initAdminAccordion();
       toggleAdminMode(false);
+      checkPendingSharedDeepLink();
     }
 
 // Exponer controladores globales en window ANTES del arranque inicial para atributos inline y sincronización en vivo
@@ -11346,6 +11705,8 @@ Object.assign(window, {
   openBlogModal,
   closeBlogModal,
   shareCurrentBlog,
+  shareCurrentMerch,
+  checkPendingSharedDeepLink,
   blogModalBgClick,
   persistGamesLocalCache,
   schedulePersistGamesLocalCache,

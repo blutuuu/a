@@ -5,6 +5,7 @@ import {
   preloadSharedGameMusicApi,
   startSharedGameMusic,
   notifySharedGameUserGesture,
+  isSharedGameMusicActive,
   isSharedGameMusicMuted,
   registerSharedMuteButton,
   stopAndDestroySharedGameMusic
@@ -74,7 +75,7 @@ export function launchMiniGameFromBlog(gameType, mode) {
     window.syncLiveBlogModalToMemory(true);
   }
 
-  const alreadyPlayingMusic = Boolean(document.getElementById("blutu-shared-yt-container"));
+  const alreadyPlayingMusic = isSharedGameMusicActive();
   destroyActiveMiniGame(alreadyPlayingMusic);
   window.__isMiniGameScreenOpen = true;
 

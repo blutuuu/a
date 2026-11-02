@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------
-# Configuración Anti-Caché para Blutu (Instagram, Facebook y WebViews)
+# Configuración Anti-Caché y Enlaces Limpios blutu.org/... para Blutu
 # ----------------------------------------------------------------------
 
 <IfModule mod_headers.c>
@@ -15,4 +15,13 @@
     <FilesMatch "\.(css|js|mjs|json)$">
         Header set Cache-Control "public, max-age=3600, must-revalidate"
     </FilesMatch>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /index.html [L]
 </IfModule>

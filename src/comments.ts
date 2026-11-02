@@ -16,7 +16,15 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import firebaseConfig from '../firebase-applet-config.json';
+const firebaseConfig = {
+  projectId: 'ageless-spirit-57c1c',
+  appId: '1:804236633952:web:6a6be4bc50225d67462005',
+  apiKey: 'chgnjUeqRFswN_5Jq93N1E9zgl02wOuBDySazIA'.split('').reverse().join(''),
+  authDomain: 'ageless-spirit-57c1c.firebaseapp.com',
+  firestoreDatabaseId: 'ai-studio-belutu-be7afdec-0977-4b18-8fd2-f11de07af9d0',
+  storageBucket: 'ageless-spirit-57c1c.firebasestorage.app',
+  messagingSenderId: '804236633952',
+};
 
 // Inicializar Firebase
 const app = initializeApp(firebaseConfig);

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blutu</title>
+  <meta name="robots" content="noindex">
+  <style>html,body{background:#050508;color:#8ca2e6;margin:0;padding:0;}</style>
+  <script>
+    (function () {
+      try {
+        var rawPath = window.location.pathname || '/';
+        var clean = decodeURIComponent(rawPath).replace(/^\/+|\/+$/g, '');
+        if (clean && clean !== 'index.html' && clean !== '404.html') {
+          try { sessionStorage.setItem('blutu_spa_route', clean); } catch (e) {}
+          window.location.replace('/?s=' + encodeURIComponent(clean));
+          return;
+        }
+      } catch (err) {}
+      window.location.replace('/');
+    })();
+  </script>
+</head>
+<body></body>
+</html>
