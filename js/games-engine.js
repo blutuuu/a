@@ -1,671 +1,845 @@
-/* Blutu — Motores de Memorama (4x5) y 6x6 (Carga Bajo Demanda) */
-import { buildDefaultGothicCardSvgDataUri, collectDefaultMemoramaPairImages } from "./data-defaults.js";
+/* Blutu — Motores de Minijuegos Bajo Demanda (Memorama 4x5 y 6x6)
+   Solo se importa cuando el usuario abre o juega un minijuego y se destruye por completo al salir */
+import { buildDefaultGothicCardSvgDataUri, createDefaultGamesData } from "./data-defaults.js";
+import {
+  preloadSharedGameMusicApi,
+  startSharedGameMusic,
+  notifySharedGameUserGesture,
+  isSharedGameMusicMuted,
+  registerSharedMuteButton,
+  stopAndDestroySharedGameMusic
+} from "./game-audio.js";
+
+// Pre-calentar la API de música sin reproducir ni crear reproductores aún cuando el módulo se importa al abrir el blog del juego
+preloadSharedGameMusicApi();
 
 let activeMiniGame = null;
-Object.defineProperty(window, "activeMiniGame", {
-  configurable: true,
-  get: () => activeMiniGame,
-  set: (v) => { activeMiniGame = v; }
-});
+window.activeMiniGame = null;
 
-const getIsAdminMode = () => Boolean(window.isAdminMode);
-const getGamesData = () => window.gamesData;
-const setCurrentGameBlogKey = (k) => { window.currentGameBlogKey = k; };
-const syncLiveBlogModalToMemory = (...a) => window.syncLiveBlogModalToMemory && window.syncLiveBlogModalToMemory(...a);
-const renderGamesSection = (...a) => window.renderGamesSection && window.renderGamesSection(...a);
-const resetBlogParagraphRevealState = (...a) => window.resetBlogParagraphRevealState && window.resetBlogParagraphRevealState(...a);
-const closeBlogModal = (...a) => window.closeBlogModal && window.closeBlogModal(...a);
-const applyBlogModalAdaptiveTheme = (...a) => window.applyBlogModalAdaptiveTheme && window.applyBlogModalAdaptiveTheme(...a);
-const escapeHtmlAttr = (s) => (window.escapeHtmlAttr ? window.escapeHtmlAttr(s) : String(s || ""));
-const escapeHtmlText = (s) => (window.escapeHtmlText ? window.escapeHtmlText(s) : String(s ?? ""));
-const computeGameButtonStyleAttr = (c) => (window.computeGameButtonStyleAttr ? window.computeGameButtonStyleAttr(c) : "");
+function setActiveMiniGame(val) {
+  activeMiniGame = val;
+  window.activeMiniGame = val;
+}
 
-    /* GESTIÓN ESTRICTA DE CICLO DE VIDA DE JUEGOS (CERO CARGA EN REPOSO Y AL TERMINAR) */
-    export function teardownActiveMiniGameRuntime() {
-      if (!activeMiniGame) return;
-      if (activeMiniGame.timerInterval) {
-        clearInterval(activeMiniGame.timerInterval);
-        activeMiniGame.timerInterval = null;
-      }
-      if (activeMiniGame.mismatchTimeout) {
-        clearTimeout(activeMiniGame.mismatchTimeout);
-        activeMiniGame.mismatchTimeout = null;
-      }
-      if (Array.isArray(activeMiniGame.aiTimeouts)) {
-        activeMiniGame.aiTimeouts.forEach(t => clearTimeout(t));
-        activeMiniGame.aiTimeouts = [];
-      }
+function escapeAttr(str) {
+  return typeof window.escapeHtmlAttr === "function" ? window.escapeHtmlAttr(str) : String(str || "");
+}
+function escapeTxt(str) {
+  return typeof window.escapeHtmlText === "function" ? window.escapeHtmlText(str) : String(str || "");
+}
+function normHex(col) {
+  return typeof window.normalizeCssColorToHex === "function" ? window.normalizeCssColorToHex(col) : String(col || "");
+}
+function btnStyleAttr(col) {
+  return typeof window.computeGameButtonStyleAttr === "function" ? window.computeGameButtonStyleAttr(col) : "";
+}
+
+function buildMiniGameMuteButtonHTML(btnId) {
+  const muted = isSharedGameMusicMuted();
+  const label = muted ? "Activar música" : "Silenciar música";
+  const icon = muted
+    ? '<i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>'
+    : '<i class="fa-solid fa-volume-high" aria-hidden="true"></i>';
+  return `<button type="button" id="${escapeAttr(btnId)}" class="minigame-mute-btn${muted ? ' is-muted' : ''}" aria-label="${escapeAttr(label)}" aria-pressed="${muted ? 'true' : 'false'}" title="${escapeAttr(label)}" onclick="event.stopPropagation(); toggleSharedGameMute();">${icon}</button>`;
+}
+
+export function destroyActiveMiniGame(keepAudioAlive = false) {
+  if (activeMiniGame) {
+    activeMiniGame.destroyed = true;
+    if (activeMiniGame.rafId) {
+      cancelAnimationFrame(activeMiniGame.rafId);
+      activeMiniGame.rafId = null;
     }
-
-    export function destroyActiveMiniGame() {
-      teardownActiveMiniGameRuntime();
-      activeMiniGame = null;
+    if (activeMiniGame.aiTimeout) {
+      clearTimeout(activeMiniGame.aiTimeout);
+      activeMiniGame.aiTimeout = null;
     }
-    window.destroyActiveMiniGame = destroyActiveMiniGame;
-
-    function shuffleGameArray(arr) {
-      const copy = [...arr];
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tmp = copy[i];
-        copy[i] = copy[j];
-        copy[j] = tmp;
-      }
-      return copy;
+    if (activeMiniGame.mismatchTimeout) {
+      clearTimeout(activeMiniGame.mismatchTimeout);
+      activeMiniGame.mismatchTimeout = null;
     }
-
-    function formatElapsedSecondsSpanish(totalMs) {
-      const totalSec = Math.max(0, totalMs / 1000);
-      const mins = Math.floor(totalSec / 60);
-      const secs = totalSec - (mins * 60);
-      if (mins > 0) {
-        const wholeSecs = Math.floor(secs).toString().padStart(2, '0');
-        const tenths = Math.floor((secs - Math.floor(secs)) * 10);
-        return `${mins}:${wholeSecs}.${tenths}`;
-      }
-      return `${secs.toFixed(1)} s`;
+    if (activeMiniGame.wrongTapTimeout) {
+      clearTimeout(activeMiniGame.wrongTapTimeout);
+      activeMiniGame.wrongTapTimeout = null;
     }
+    setActiveMiniGame(null);
+  }
+  if (!keepAudioAlive) {
+    stopAndDestroySharedGameMusic(false);
+  }
+}
 
-    export function launchMiniGameFromBlog(gameType, mode) {
-      if (getIsAdminMode() && document.getElementById('blogEditableBody')) {
-        syncLiveBlogModalToMemory(true);
-        renderGamesSection();
-      }
-      const modalBody = document.getElementById('blogModalBody');
-      if (modalBody) {
-        resetBlogParagraphRevealState(modalBody);
-      }
-      if (gameType === 'memorama') {
-        startMemoramaGame(mode);
-      } else if (gameType === 'sixbysix') {
-        startSixBySixGame(mode);
-      }
-    }
-    window.launchMiniGameFromBlog = launchMiniGameFromBlog;
+export function launchMiniGameFromBlog(gameType, mode) {
+  if (window.isAdminMode && document.getElementById("blogEditableBody") && typeof window.syncLiveBlogModalToMemory === "function") {
+    window.syncLiveBlogModalToMemory(true);
+  }
 
-    export function exitMiniGameVolver() {
-      destroyActiveMiniGame();
-      closeBlogModal(true);
-    }
-    window.exitMiniGameVolver = exitMiniGameVolver;
+  const alreadyPlayingMusic = Boolean(document.getElementById("blutu-shared-yt-container"));
+  destroyActiveMiniGame(alreadyPlayingMusic);
+  window.__isMiniGameScreenOpen = true;
 
-    /* ============================================================================
-       MOTOR 1: MEMORAMA (REJILLA 4x5 = 20 CARTAS / 10 PAREJAS — MODOS SOLO Y VS PC)
-       ============================================================================ */
-    export function startMemoramaGame(mode) {
-      destroyActiveMiniGame();
+  const modalEl = document.getElementById("blogReadModal");
+  const modalBox = document.querySelector("#blogReadModal .blog-modal-box");
+  if (modalEl && modalEl.style.display !== "flex") {
+    modalEl.style.display = "flex";
+    document.body.style.overflow = "hidden";
+    if (typeof window.pushModalState === "function") window.pushModalState("blog");
+  }
+  if (modalBox) {
+    modalBox.classList.add("is-minigame-active");
+    modalBox.scrollTop = 0;
+  }
 
-      const modalEl = document.getElementById('blogReadModal');
-      const modalBody = document.getElementById('blogModalBody');
-      const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
-      if (!modalEl || !modalBody) return;
+  // Asegurar que la canción del Easter Egg esté activa durante la partida (sin reiniciarla bruscamente al pulsar Reintentar)
+  if (!alreadyPlayingMusic) {
+    startSharedGameMusic(modalBox || document.body, "minigameHudMuteBtn");
+  } else {
+    notifySharedGameUserGesture();
+  }
 
-      setCurrentGameBlogKey('memorama');
-      if (modalBox) {
-        modalBox.classList.add('is-minigame-active');
-        modalBox.scrollTop = 0;
-      }
-      applyBlogModalAdaptiveTheme(getGamesData().blogs.memorama, null);
+  if (gameType === "memorama") {
+    window.currentGameBlogKey = "memorama";
+    const resolvedMode = mode === "vspc" ? "vspc-hard" : mode;
+    startMemoramaRuntime(resolvedMode);
+  } else if (gameType === "sixbysix") {
+    window.currentGameBlogKey = "sixbysix";
+    startSixBySixRuntime(mode);
+  }
+}
 
-      const rawPairs = (getGamesData().memorama && Array.isArray(getGamesData().memorama.pairImages))
-        ? getGamesData().memorama.pairImages.slice(0, 10)
-        : collectDefaultMemoramaPairImages();
-      const fallbacks = collectDefaultMemoramaPairImages();
-      const pairUrls = [];
-      for (let i = 0; i < 10; i++) {
-        pairUrls.push((rawPairs[i] && String(rawPairs[i]).trim()) ? String(rawPairs[i]).trim() : fallbacks[i]);
-      }
+export function exitMiniGameVolver() {
+  const returnKey = window.currentGameBlogKey;
+  destroyActiveMiniGame(false);
+  window.__isMiniGameScreenOpen = false;
+  if (returnKey && window.gamesData && window.gamesData.blogs && window.gamesData.blogs[returnKey] && typeof window.openGameBlogModal === "function") {
+    window.openGameBlogModal(returnKey);
+  } else if (typeof window.closeBlogModal === "function") {
+    window.closeBlogModal(true);
+  }
+}
 
-      const deck = [];
-      for (let pid = 0; pid < 10; pid++) {
-        deck.push({ pairId: pid, img: pairUrls[pid], matched: false, owner: null });
-        deck.push({ pairId: pid, img: pairUrls[pid], matched: false, owner: null });
-      }
-      const shuffledDeck = shuffleGameArray(deck);
+function shuffleArrayInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
 
-      const isVsPc = (mode === 'vspc');
-      activeMiniGame = {
-        type: 'memorama',
-        mode: isVsPc ? 'vspc' : 'solo',
-        deck: shuffledDeck,
-        flippedIndices: [],
-        locked: false,
-        turn: 'user',
-        userPairs: 0,
-        pcPairs: 0,
-        matchedTotal: 0,
-        seenHistory: [], // [{ index, pairId }] memoria reciente de cartas vistas por la PC
-        startTimeMs: performance.now(),
-        elapsedMs: 0,
-        timerInterval: null,
-        mismatchTimeout: null,
-        aiTimeouts: []
-      };
+function formatMemoramaTime(ms) {
+  const totalTenths = Math.max(0, Math.floor(ms / 100));
+  const tenths = totalTenths % 10;
+  const totalSecs = Math.floor(totalTenths / 10);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  if (mins > 0) {
+    return `${mins}:${String(secs).padStart(2, "0")}.${tenths} s`;
+  }
+  return `${secs}.${tenths} s`;
+}
 
-      const cardsHTML = shuffledDeck.map((card, idx) => {
-        const fbUri = escapeHtmlAttr(buildDefaultGothicCardSvgDataUri(String(card.pairId + 1), '#8ca2e6'));
-        return `
-          <button type="button" class="memorama-card" data-card-idx="${idx}" onclick="handleMemoramaCardTap(${idx})" aria-label="Carta ${idx + 1}">
-            <div class="memorama-card-inner">
-              <div class="memorama-card-face memorama-card-back">
-                <span class="memorama-card-back-emblem">✠</span>
-              </div>
-              <div class="memorama-card-face memorama-card-front">
-                <img src="${escapeHtmlAttr(card.img)}" alt="" decoding="async" referrerpolicy="no-referrer" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fbUri}';}">
-              </div>
-            </div>
-          </button>
-        `;
-      }).join('');
+function resolvePairCropAttrsAndStyle(cropVal) {
+  const cleanCrop = String(cropVal || "cover-center").trim() || "cover-center";
+  const parsed = typeof window.parsePostImageCrop === "function"
+    ? window.parsePostImageCrop(cleanCrop)
+    : { isCrop: false };
+  const styleStr = typeof window.getFitCssForPost === "function"
+    ? window.getFitCssForPost(cleanCrop)
+    : "object-fit: cover; object-position: center center;";
+  const cls = parsed && parsed.isCrop ? "memorama-card-img blog-thumb-cropped" : "memorama-card-img";
+  const extraAttrs = parsed && parsed.isCrop
+    ? ` data-crop-z="${Number(parsed.z || 1).toFixed(3)}" onload="if(window.syncBlogCroppedThumbCover){window.syncBlogCroppedThumbCover(this);}"`
+    : "";
+  return { cls, styleStr, extraAttrs };
+}
 
-      if (isVsPc) {
-        modalBody.innerHTML = `
-          <div class="blutu-minigame-stage">
-            <div class="minigame-hud-bar">
-              <div class="minigame-hud-stat">
-                <span class="minigame-hud-label">Tú</span>
-                <span id="memHudUserScore" class="minigame-hud-value is-active-turn">0</span>
-              </div>
-              <div class="minigame-hud-stat is-center">
-                <span id="memHudTurnLabel" class="minigame-turn-pill">Tu turno</span>
-              </div>
-              <div class="minigame-hud-stat is-right">
-                <span class="minigame-hud-label">PC</span>
-                <span id="memHudPcScore" class="minigame-hud-value">0</span>
-              </div>
-            </div>
-            <div id="memoramaGridEl" class="memorama-grid-4x5">
-              ${cardsHTML}
-            </div>
+/* ==================== MOTOR MEMORAMA (4×5 — 10 PAREJAS) ==================== */
+function startMemoramaRuntime(mode) {
+  const modalBody = document.getElementById("blogModalBody");
+  if (!modalBody) return;
+
+  if (!window.gamesData || !window.gamesData.memorama) {
+    window.gamesData = createDefaultGamesData();
+  }
+  const memCfg = window.gamesData.memorama;
+  const pairUrls = Array.isArray(memCfg.pairImages) ? memCfg.pairImages.slice(0, 10) : [];
+  const pairCrops = Array.isArray(memCfg.pairCrops) ? memCfg.pairCrops.slice(0, 10) : [];
+  while (pairUrls.length < 10) {
+    pairUrls.push(buildDefaultGothicCardSvgDataUri(String(pairUrls.length + 1), "#8ca2e6"));
+  }
+  while (pairCrops.length < 10) {
+    pairCrops.push("cover-center");
+  }
+
+  const deck = [];
+  for (let p = 0; p < 10; p++) {
+    const fallbackUri = buildDefaultGothicCardSvgDataUri(String(p + 1), "#8ca2e6");
+    const url = pairUrls[p] || fallbackUri;
+    const cropVal = pairCrops[p] || "cover-center";
+    deck.push({ uid: p * 2, pairId: p, imgUrl: url, fallbackUri, cropVal, matched: false, matchedBy: null });
+    deck.push({ uid: p * 2 + 1, pairId: p, imgUrl: url, fallbackUri, cropVal, matched: false, matchedBy: null });
+  }
+  shuffleArrayInPlace(deck);
+
+  const isVsPc = (mode === "vspc-easy" || mode === "vspc-hard" || mode === "vspc");
+  const isVsPcEasy = (mode === "vspc-easy");
+
+  const game = {
+    type: "memorama",
+    mode: isVsPc ? (isVsPcEasy ? "vspc-easy" : "vspc-hard") : "solo",
+    isVsPcEasy,
+    destroyed: false,
+    deck,
+    flippedIndices: [],
+    pendingMismatchPair: null,
+    locked: false,
+    turn: "user",
+    userPairs: 0,
+    pcPairs: 0,
+    seenMemory: new Map(),
+    startTime: performance.now(),
+    rafId: null,
+    aiTimeout: null,
+    mismatchTimeout: null
+  };
+  setActiveMiniGame(game);
+
+  const cardsHTML = deck.map((card, idx) => {
+    const fbAttr = escapeAttr(card.fallbackUri);
+    const { cls, styleStr, extraAttrs } = resolvePairCropAttrsAndStyle(card.cropVal);
+    return `
+      <button type="button" class="memorama-card" id="memCard_${idx}" data-card-idx="${idx}" aria-label="Carta ${idx + 1}">
+        <div class="memorama-card-inner">
+          <div class="memorama-card-face memorama-card-back">
+            <span class="memorama-card-back-emblem" aria-hidden="true">✠</span>
           </div>
-        `;
+          <div class="memorama-card-face memorama-card-front">
+            <img src="${escapeAttr(card.imgUrl)}" alt="" class="${cls}" decoding="async" referrerpolicy="no-referrer"${extraAttrs} style="${styleStr}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fbAttr}';}">
+          </div>
+        </div>
+      </button>
+    `;
+  }).join("");
+
+  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+
+  if (!isVsPc) {
+    // Modo Solo: Botón de silenciar arriba a la izquierda (opuesto a la X de cerrar) + Tiempo centrado abajo (sin contador de parejas)
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="blutu-minigame-stage">
+        <div class="minigame-hud-bar is-solo-memorama">
+          <div class="minigame-hud-stat is-center">
+            <span class="minigame-hud-label">Tiempo</span>
+            <span class="minigame-hud-value" id="memHudTimer">0.0 s</span>
+          </div>
+        </div>
+        <div class="memorama-grid-4x5" id="memoramaGridEl">
+          ${cardsHTML}
+        </div>
+      </div>
+    `;
+
+    const tickSolo = (now) => {
+      if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+      const elapsed = now - game.startTime;
+      const timerEl = document.getElementById("memHudTimer");
+      if (timerEl) timerEl.textContent = formatMemoramaTime(elapsed);
+      game.rafId = requestAnimationFrame(tickSolo);
+    };
+    game.rafId = requestAnimationFrame(tickSolo);
+  } else {
+    const diffBadge = isVsPcEasy ? "Fácil" : "Difícil";
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="blutu-minigame-stage">
+        <div class="minigame-hud-bar is-vspc-memorama">
+          <div class="minigame-hud-stat">
+            <span class="minigame-hud-label">Tú</span>
+            <span class="minigame-hud-value is-active-turn" id="memHudUserScore">0</span>
+          </div>
+          <div class="minigame-hud-stat is-center">
+            <span class="minigame-hud-label">Vs PC · ${diffBadge}</span>
+            <span class="minigame-turn-pill" id="memHudTurnText">Tu turno</span>
+          </div>
+          <div class="minigame-hud-stat is-right">
+            <span class="minigame-hud-label">PC</span>
+            <span class="minigame-hud-value" id="memHudPcScore">0</span>
+          </div>
+        </div>
+        <div class="memorama-grid-4x5" id="memoramaGridEl">
+          ${cardsHTML}
+        </div>
+      </div>
+    `;
+  }
+
+  registerSharedMuteButton("minigameHudMuteBtn");
+
+  // Ajustar miniaturas recortadas al montar la rejilla
+  requestAnimationFrame(() => {
+    if (typeof window.syncBlogCroppedThumbCover === "function") {
+      modalBody.querySelectorAll("img.blog-thumb-cropped").forEach(window.syncBlogCroppedThumbCover);
+    }
+  });
+
+  // Delegación táctil ultrarrápida (pointerdown) para que cada toque con el dedo responda a la primera sin fallos
+  const gridEl = document.getElementById("memoramaGridEl");
+  if (gridEl) {
+    let lastHandledTouchTs = 0;
+    const onFastCardInput = (ev) => {
+      if (ev.type === "pointerdown" && ev.button !== undefined && ev.button > 0) return;
+      const cardBtn = ev.target && ev.target.closest ? ev.target.closest(".memorama-card") : null;
+      if (!cardBtn) return;
+      const idx = parseInt(cardBtn.getAttribute("data-card-idx") || "-1", 10);
+      if (!Number.isFinite(idx) || idx < 0) return;
+
+      const nowTs = performance.now();
+      if (ev.type === "click" && (nowTs - lastHandledTouchTs) < 450) return;
+      if (ev.type !== "click") {
+        lastHandledTouchTs = nowTs;
+        if (ev.cancelable) ev.preventDefault();
+      }
+
+      notifySharedGameUserGesture();
+      handleMemoramaCardTap(idx);
+    };
+
+    if (window.PointerEvent) {
+      gridEl.addEventListener("pointerdown", onFastCardInput);
+    } else {
+      gridEl.addEventListener("touchstart", onFastCardInput, { passive: false });
+      gridEl.addEventListener("mousedown", onFastCardInput);
+    }
+    gridEl.addEventListener("click", onFastCardInput);
+  }
+}
+
+function recordMemoramaSeenCard(game, cardIndex) {
+  if (!game || !game.deck[cardIndex]) return;
+  const pairId = game.deck[cardIndex].pairId;
+  if (game.seenMemory.has(cardIndex)) {
+    game.seenMemory.delete(cardIndex);
+  }
+  game.seenMemory.set(cardIndex, pairId);
+
+  // En Fácil la PC recuerda muy pocas cartas recientes; en Difícil tiene memoria aguda
+  const maxMemory = game.isVsPcEasy ? 3 : 9;
+  while (game.seenMemory.size > maxMemory) {
+    const oldestKey = game.seenMemory.keys().next().value;
+    game.seenMemory.delete(oldestKey);
+  }
+}
+
+function setMemoramaCardFlippedDOM(idx, flipped, matchedBy) {
+  const el = document.getElementById(`memCard_${idx}`);
+  if (!el) return;
+  el.classList.toggle("is-flipped", Boolean(flipped));
+  if (matchedBy) {
+    el.classList.add("is-matched");
+    if (matchedBy === "pc") el.classList.add("is-matched-pc");
+    el.disabled = true;
+  }
+}
+
+function updateMemoramaVsPcHud(game) {
+  const uEl = document.getElementById("memHudUserScore");
+  const pEl = document.getElementById("memHudPcScore");
+  const tEl = document.getElementById("memHudTurnText");
+  if (uEl) {
+    uEl.textContent = String(game.userPairs);
+    uEl.classList.toggle("is-active-turn", game.turn === "user");
+  }
+  if (pEl) {
+    pEl.textContent = String(game.pcPairs);
+    pEl.classList.toggle("is-active-turn", game.turn === "pc");
+  }
+  if (tEl) {
+    tEl.textContent = game.turn === "user" ? "Tu turno" : "Turno de PC...";
+  }
+}
+
+export function handleMemoramaCardTap(idx) {
+  const game = activeMiniGame;
+  if (!game || game.destroyed || game.type !== "memorama") return;
+  if (game.mode !== "solo" && game.turn !== "user") return;
+
+  // Si en modo Solo había 2 cartas fallidas cerrándose y el jugador ya toca la siguiente carta, cerrar de inmediato sin bloquear el toque
+  if (game.locked && game.mode === "solo" && game.pendingMismatchPair) {
+    const [mA, mB] = game.pendingMismatchPair;
+    if (game.mismatchTimeout) {
+      clearTimeout(game.mismatchTimeout);
+      game.mismatchTimeout = null;
+    }
+    game.pendingMismatchPair = null;
+    setMemoramaCardFlippedDOM(mA, false, null);
+    setMemoramaCardFlippedDOM(mB, false, null);
+    game.flippedIndices = [];
+    game.locked = false;
+  }
+
+  if (game.locked) return;
+  const card = game.deck[idx];
+  if (!card || card.matched) return;
+  if (game.flippedIndices.includes(idx)) return;
+
+  flipMemoramaCardInternal(game, idx);
+}
+
+function flipMemoramaCardInternal(game, idx) {
+  if (!game || game.destroyed) return;
+  const card = game.deck[idx];
+  if (!card || card.matched || game.flippedIndices.includes(idx)) return;
+
+  game.flippedIndices.push(idx);
+  setMemoramaCardFlippedDOM(idx, true, null);
+  recordMemoramaSeenCard(game, idx);
+
+  if (game.flippedIndices.length === 2) {
+    game.locked = true;
+    const [firstIdx, secondIdx] = game.flippedIndices;
+    const firstCard = game.deck[firstIdx];
+    const secondCard = game.deck[secondIdx];
+
+    if (firstCard.pairId === secondCard.pairId) {
+      const winner = game.mode === "solo" ? "user" : game.turn;
+      firstCard.matched = true;
+      secondCard.matched = true;
+      firstCard.matchedBy = winner;
+      secondCard.matchedBy = winner;
+      game.seenMemory.delete(firstIdx);
+      game.seenMemory.delete(secondIdx);
+
+      setMemoramaCardFlippedDOM(firstIdx, true, winner);
+      setMemoramaCardFlippedDOM(secondIdx, true, winner);
+
+      if (winner === "user") game.userPairs++;
+      else game.pcPairs++;
+
+      game.flippedIndices = [];
+      game.pendingMismatchPair = null;
+
+      if (game.mode !== "solo") {
+        updateMemoramaVsPcHud(game);
+      }
+
+      const totalMatched = game.userPairs + game.pcPairs;
+      if (totalMatched >= 10) {
+        const finalElapsed = performance.now() - game.startTime;
+        game.mismatchTimeout = setTimeout(() => {
+          if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+          finishMemoramaMatch(game, finalElapsed);
+        }, 340);
+        return;
+      }
+
+      if (game.mode === "solo" || game.turn === "user") {
+        game.locked = false;
       } else {
-        modalBody.innerHTML = `
-          <div class="blutu-minigame-stage">
-            <div class="minigame-hud-bar">
-              <div class="minigame-hud-stat">
-                <span class="minigame-hud-label">Tiempo</span>
-                <span id="memHudTimer" class="minigame-hud-value">0.0 s</span>
-              </div>
-              <div class="minigame-hud-stat is-right">
-                <span class="minigame-hud-label">Parejas</span>
-                <span id="memHudPairs" class="minigame-hud-value">0 / 10</span>
-              </div>
-            </div>
-            <div id="memoramaGridEl" class="memorama-grid-4x5">
-              ${cardsHTML}
-            </div>
-          </div>
-        `;
-
-        activeMiniGame.timerInterval = setInterval(() => {
-          if (!activeMiniGame || activeMiniGame.type !== 'memorama' || activeMiniGame.mode !== 'solo') return;
-          activeMiniGame.elapsedMs = performance.now() - activeMiniGame.startTimeMs;
-          const tEl = document.getElementById('memHudTimer');
-          if (tEl) tEl.textContent = formatElapsedSecondsSpanish(activeMiniGame.elapsedMs);
-        }, 100);
+        schedulePcMemoramaTurn(game, 540);
       }
-    }
-    window.startMemoramaGame = startMemoramaGame;
-
-    function recordCardInPcMemory(game, cardIdx) {
-      if (!game || !game.deck[cardIdx]) return;
-      const pairId = game.deck[cardIdx].pairId;
-      game.seenHistory = game.seenHistory.filter(entry => entry.index !== cardIdx && !game.deck[entry.index].matched);
-      game.seenHistory.push({ index: cardIdx, pairId });
-      // Mantener memoria reciente natural para que arme parejas vistas sin ser imposible
-      if (game.seenHistory.length > 9) {
-        game.seenHistory.shift();
-      }
-    }
-
-    function setMemoramaCardDomState(idx, flipped, matched, owner) {
-      const btn = document.querySelector(`#memoramaGridEl .memorama-card[data-card-idx="${idx}"]`);
-      if (!btn) return;
-      btn.classList.toggle('is-flipped', Boolean(flipped));
-      btn.classList.toggle('is-matched', Boolean(matched));
-      btn.classList.toggle('is-matched-pc', Boolean(matched && owner === 'pc'));
-      btn.disabled = Boolean(flipped || matched);
-    }
-
-    function updateMemoramaVsPcHud(game) {
-      const uEl = document.getElementById('memHudUserScore');
-      const pEl = document.getElementById('memHudPcScore');
-      const tEl = document.getElementById('memHudTurnLabel');
-      if (uEl) {
-        uEl.textContent = String(game.userPairs);
-        uEl.classList.toggle('is-active-turn', game.turn === 'user');
-      }
-      if (pEl) {
-        pEl.textContent = String(game.pcPairs);
-        pEl.classList.toggle('is-active-turn', game.turn === 'pc');
-      }
-      if (tEl) {
-        tEl.textContent = game.turn === 'user' ? 'Tu turno' : 'Turno de PC';
-      }
-    }
-
-    function finishMemoramaGame(game) {
-      if (!game) return;
-      const finalElapsed = performance.now() - game.startTimeMs;
-      const mode = game.mode;
-      const userPairs = game.userPairs;
-      const pcPairs = game.pcPairs;
-
-      // Desmontar inmediatamente timers y rejilla de imágenes para liberar memoria al terminar
-      teardownActiveMiniGameRuntime();
-      activeMiniGame = null;
-
-      const modalBody = document.getElementById('blogModalBody');
-      if (!modalBody) return;
-
-      const memCfg = getGamesData().memorama || {};
-      const retryStyle = computeGameButtonStyleAttr(memCfg.retryBtnColor || '#4a63ab');
-      const soloStyle = computeGameButtonStyleAttr(memCfg.soloBtnColor || '#5a74bf');
-      const vsPcStyle = computeGameButtonStyleAttr(memCfg.vsPcBtnColor || '#364d8f');
-      const backStyle = computeGameButtonStyleAttr(memCfg.backBtnColor || '#1f2b4d');
-
-      if (mode === 'solo') {
-        const timeStr = formatElapsedSecondsSpanish(finalElapsed);
-        modalBody.innerHTML = `
-          <div class="minigame-result-panel">
-            <h2 class="minigame-result-title">${escapeHtmlText(timeStr)}</h2>
-            <p class="minigame-result-subtitle">10 parejas encontradas</p>
-            <div class="minigame-result-buttons">
-              <div class="minigame-result-primary-row">
-                <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="startMemoramaGame('solo')">Reintentar</button>
-                <button type="button" class="game-custom-btn" style="${vsPcStyle}" onclick="startMemoramaGame('vspc')">Vs PC</button>
-              </div>
-              <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
-            </div>
-          </div>
-        `;
-      } else {
-        let outcomeTitle = 'Empate';
-        if (userPairs > pcPairs) outcomeTitle = 'Tú ganas';
-        else if (pcPairs > userPairs) outcomeTitle = 'PC gana';
-
-        modalBody.innerHTML = `
-          <div class="minigame-result-panel">
-            <h2 class="minigame-result-title">${outcomeTitle}</h2>
-            <p class="minigame-result-subtitle">Tú: ${userPairs} — PC: ${pcPairs}</p>
-            <div class="minigame-result-buttons">
-              <div class="minigame-result-primary-row">
-                <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="startMemoramaGame('vspc')">Reintentar</button>
-                <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="startMemoramaGame('solo')">Solo</button>
-              </div>
-              <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
-            </div>
-          </div>
-        `;
-      }
-    }
-
-    function resolveMemoramaFlippedPair(actor) {
-      const game = activeMiniGame;
-      if (!game || game.type !== 'memorama' || game.flippedIndices.length !== 2) return;
-
-      const [i1, i2] = game.flippedIndices;
-      const c1 = game.deck[i1];
-      const c2 = game.deck[i2];
-
-      if (c1.pairId === c2.pairId) {
-        c1.matched = true;
-        c2.matched = true;
-        c1.owner = actor;
-        c2.owner = actor;
-        game.matchedTotal += 1;
-        game.seenHistory = game.seenHistory.filter(e => e.index !== i1 && e.index !== i2);
-
-        if (actor === 'pc') game.pcPairs += 1;
-        else game.userPairs += 1;
-
-        setMemoramaCardDomState(i1, true, true, actor);
-        setMemoramaCardDomState(i2, true, true, actor);
+    } else {
+      game.pendingMismatchPair = [firstIdx, secondIdx];
+      game.mismatchTimeout = setTimeout(() => {
+        if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+        game.pendingMismatchPair = null;
+        setMemoramaCardFlippedDOM(firstIdx, false, null);
+        setMemoramaCardFlippedDOM(secondIdx, false, null);
         game.flippedIndices = [];
 
-        if (game.mode === 'solo') {
-          const pairsEl = document.getElementById('memHudPairs');
-          if (pairsEl) pairsEl.textContent = `${game.matchedTotal} / 10`;
-        } else {
-          updateMemoramaVsPcHud(game);
-        }
-
-        if (game.matchedTotal >= 10) {
-          const finishTimer = setTimeout(() => {
-            if (activeMiniGame === game) finishMemoramaGame(game);
-          }, 420);
-          game.aiTimeouts.push(finishTimer);
-          return;
-        }
-
-        if (game.mode === 'vspc' && actor === 'pc') {
-          const nextPcTimer = setTimeout(() => {
-            if (activeMiniGame === game) runMemoramaPcTurn();
-          }, 620);
-          game.aiTimeouts.push(nextPcTimer);
-        } else {
+        if (game.mode === "solo") {
           game.locked = false;
-        }
-      } else {
-        game.mismatchTimeout = setTimeout(() => {
-          if (activeMiniGame !== game) return;
-          game.mismatchTimeout = null;
-          setMemoramaCardDomState(i1, false, false, null);
-          setMemoramaCardDomState(i2, false, false, null);
-          game.flippedIndices = [];
-
-          if (game.mode === 'vspc') {
-            game.turn = (actor === 'user') ? 'pc' : 'user';
-            updateMemoramaVsPcHud(game);
-            if (game.turn === 'pc') {
-              runMemoramaPcTurn();
-            } else {
-              game.locked = false;
-            }
+        } else {
+          game.turn = game.turn === "user" ? "pc" : "user";
+          updateMemoramaVsPcHud(game);
+          if (game.turn === "pc") {
+            schedulePcMemoramaTurn(game, 440);
           } else {
             game.locked = false;
           }
-        }, 720);
-      }
+        }
+      }, 680);
+    }
+  }
+}
+
+function findKnownPairInMemory(game) {
+  if (game.isVsPcEasy && Math.random() > 0.28) {
+    return null;
+  }
+  const byPair = new Map();
+  for (const [cardIdx, pairId] of game.seenMemory.entries()) {
+    const c = game.deck[cardIdx];
+    if (!c || c.matched) continue;
+    if (byPair.has(pairId)) {
+      return [byPair.get(pairId), cardIdx];
+    }
+    byPair.set(pairId, cardIdx);
+  }
+  return null;
+}
+
+function findMatchingCardInMemory(game, targetPairId, excludeIdx) {
+  if (game.isVsPcEasy && Math.random() > 0.32) {
+    return -1;
+  }
+  for (const [cardIdx, pairId] of game.seenMemory.entries()) {
+    if (cardIdx !== excludeIdx && pairId === targetPairId && game.deck[cardIdx] && !game.deck[cardIdx].matched) {
+      return cardIdx;
+    }
+  }
+  return -1;
+}
+
+function schedulePcMemoramaTurn(game, delayMs) {
+  if (!game || game.destroyed) return;
+  game.locked = true;
+  if (game.aiTimeout) clearTimeout(game.aiTimeout);
+
+  game.aiTimeout = setTimeout(() => {
+    if (!activeMiniGame || activeMiniGame !== game || game.destroyed || game.turn !== "pc") return;
+
+    const unmatchedIndices = [];
+    for (let i = 0; i < game.deck.length; i++) {
+      if (!game.deck[i].matched) unmatchedIndices.push(i);
+    }
+    if (unmatchedIndices.length < 2) return;
+
+    const knownPair = findKnownPairInMemory(game);
+    let firstPick = -1;
+    let plannedSecondPick = -1;
+
+    if (knownPair) {
+      firstPick = knownPair[0];
+      plannedSecondPick = knownPair[1];
+    } else {
+      const unknownIndices = unmatchedIndices.filter(idx => !game.seenMemory.has(idx));
+      const pool = (!game.isVsPcEasy && unknownIndices.length > 0) ? unknownIndices : unmatchedIndices;
+      firstPick = pool[Math.floor(Math.random() * pool.length)];
     }
 
-    export function handleMemoramaCardTap(cardIdx) {
-      const game = activeMiniGame;
-      if (!game || game.type !== 'memorama' || game.locked) return;
-      if (game.mode === 'vspc' && game.turn !== 'user') return;
+    flipMemoramaCardInternal(game, firstPick);
 
-      const card = game.deck[cardIdx];
-      if (!card || card.matched || game.flippedIndices.includes(cardIdx)) return;
-
-      game.flippedIndices.push(cardIdx);
-      setMemoramaCardDomState(cardIdx, true, false, null);
-      recordCardInPcMemory(game, cardIdx);
-
-      if (game.flippedIndices.length === 2) {
-        game.locked = true;
-        resolveMemoramaFlippedPair('user');
-      }
-    }
-    window.handleMemoramaCardTap = handleMemoramaCardTap;
-
-    function findKnownPairInPcMemory(game) {
-      const byPair = new Map();
-      for (const item of game.seenHistory) {
-        if (game.deck[item.index] && !game.deck[item.index].matched) {
-          if (byPair.has(item.pairId)) {
-            const firstIdx = byPair.get(item.pairId);
-            if (firstIdx !== item.index) {
-              return [firstIdx, item.index];
-            }
-          } else {
-            byPair.set(item.pairId, item.index);
-          }
+    game.aiTimeout = setTimeout(() => {
+      if (!activeMiniGame || activeMiniGame !== game || game.destroyed || game.turn !== "pc") return;
+      let secondPick = plannedSecondPick;
+      if (secondPick === -1 || secondPick === firstPick || game.deck[secondPick].matched) {
+        const matchFromMem = findMatchingCardInMemory(game, game.deck[firstPick].pairId, firstPick);
+        if (matchFromMem !== -1) {
+          secondPick = matchFromMem;
+        } else {
+          const remaining = unmatchedIndices.filter(idx => idx !== firstPick && !game.deck[idx].matched);
+          const remainingUnknown = remaining.filter(idx => !game.seenMemory.has(idx));
+          const pool2 = (!game.isVsPcEasy && remainingUnknown.length > 0) ? remainingUnknown : remaining;
+          secondPick = pool2[Math.floor(Math.random() * pool2.length)];
         }
       }
-      return null;
-    }
-
-    function runMemoramaPcTurn() {
-      const game = activeMiniGame;
-      if (!game || game.type !== 'memorama' || game.mode !== 'vspc' || game.matchedTotal >= 10) return;
-
-      game.locked = true;
-      game.turn = 'pc';
-      updateMemoramaVsPcHud(game);
-
-      const unmatchedIndices = [];
-      game.deck.forEach((c, idx) => {
-        if (!c.matched) unmatchedIndices.push(idx);
-      });
-      if (unmatchedIndices.length < 2) return;
-
-      const knownPair = findKnownPairInPcMemory(game);
-      let firstPick = -1;
-      let plannedSecondPick = -1;
-
-      if (knownPair) {
-        firstPick = knownPair[0];
-        plannedSecondPick = knownPair[1];
-      } else {
-        const seenSet = new Set(game.seenHistory.map(e => e.index));
-        const unseenPool = unmatchedIndices.filter(idx => !seenSet.has(idx));
-        const pool = unseenPool.length > 0 ? unseenPool : unmatchedIndices;
-        firstPick = pool[Math.floor(Math.random() * pool.length)];
+      if (secondPick !== undefined && secondPick !== -1) {
+        flipMemoramaCardInternal(game, secondPick);
       }
+    }, 520);
+  }, delayMs);
+}
 
-      const t1 = setTimeout(() => {
-        if (activeMiniGame !== game) return;
-        game.flippedIndices.push(firstPick);
-        setMemoramaCardDomState(firstPick, true, false, null);
-        recordCardInPcMemory(game, firstPick);
+function finishMemoramaMatch(game, elapsedMs) {
+  const mode = game.mode;
+  const userPairs = game.userPairs;
+  const pcPairs = game.pcPairs;
 
-        let secondPick = plannedSecondPick;
-        if (secondPick === -1 || secondPick === firstPick || game.deck[secondPick].matched) {
-          const firstPairId = game.deck[firstPick].pairId;
-          const matchingKnown = game.seenHistory.find(
-            e => e.pairId === firstPairId && e.index !== firstPick && !game.deck[e.index].matched
-          );
-          if (matchingKnown) {
-            secondPick = matchingKnown.index;
-          } else {
-            const seenSetNow = new Set(game.seenHistory.map(e => e.index));
-            const remainingUnseen = unmatchedIndices.filter(idx => idx !== firstPick && !seenSetNow.has(idx));
-            const remainingAny = unmatchedIndices.filter(idx => idx !== firstPick);
-            const secondPool = remainingUnseen.length > 0 ? remainingUnseen : remainingAny;
-            secondPick = secondPool[Math.floor(Math.random() * secondPool.length)];
-          }
+  // Liberar memoria de la partida terminada, manteniendo el indicador de pantalla de resultado y la música hasta que salga o reintente
+  destroyActiveMiniGame(true);
+  window.__isMiniGameScreenOpen = true;
+
+  const modalBody = document.getElementById("blogModalBody");
+  if (!modalBody) return;
+
+  const mem = window.gamesData.memorama;
+  const soloStyle = btnStyleAttr(normHex(mem.soloBtnColor || "#5a74bf"));
+  const vsPcStyle = btnStyleAttr(normHex(mem.vsPcBtnColor || "#364d8f"));
+  const vsPcEasyStyle = btnStyleAttr(normHex(mem.vsPcEasyBtnColor || "#4b67b3"));
+  const vsPcHardStyle = btnStyleAttr(normHex(mem.vsPcHardBtnColor || "#2b3e78"));
+  const retryStyle = btnStyleAttr(normHex(mem.retryBtnColor || "#4a63ab"));
+  const backStyle = btnStyleAttr(normHex(mem.backBtnColor || "#1f2b4d"));
+
+  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+
+  if (mode === "solo") {
+    const timeStr = formatMemoramaTime(elapsedMs);
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="minigame-result-panel">
+        <h2 class="minigame-result-title">${escapeTxt(timeStr)}</h2>
+        <div class="minigame-result-buttons">
+          <div class="minigame-result-primary-row">
+            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Reintentar</button>
+            <button type="button" class="game-custom-btn" style="${vsPcStyle}" onclick="toggleMemoramaVsPcDifficultyRow('soloResultVsPcDiffRow')">Vs PC</button>
+          </div>
+          <div id="soloResultVsPcDiffRow" class="game-blog-vspc-subrow" style="display:none;">
+            <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcEasyStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
+            <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcHardStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
+          </div>
+          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+        </div>
+      </div>
+    `;
+  } else {
+    let outcomeTitle = "Empate";
+    if (userPairs > pcPairs) outcomeTitle = "Tú ganas";
+    else if (pcPairs > userPairs) outcomeTitle = "PC gana";
+
+    const otherVsMode = mode === "vspc-easy" ? "vspc-hard" : "vspc-easy";
+    const otherVsLabel = mode === "vspc-easy" ? "Difícil" : "Fácil";
+    const otherVsStyle = mode === "vspc-easy" ? vsPcHardStyle : vsPcEasyStyle;
+
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="minigame-result-panel">
+        <h2 class="minigame-result-title">${outcomeTitle}</h2>
+        <p class="minigame-result-subtitle">Tú: ${userPairs} — PC: ${pcPairs}</p>
+        <div class="minigame-result-buttons">
+          <div class="minigame-result-primary-row">
+            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', '${mode}')">Reintentar</button>
+            <button type="button" class="game-custom-btn" style="${otherVsStyle}" onclick="launchMiniGameFromBlog('memorama', '${otherVsMode}')">Vs PC ${otherVsLabel}</button>
+            <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
+          </div>
+          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+        </div>
+      </div>
+    `;
+  }
+  registerSharedMuteButton("minigameHudMuteBtn");
+}
+
+/* ==================== MOTOR 6X6 (1 AL 36 — 40 SEGUNDOS) ==================== */
+function startSixBySixRuntime(mode) {
+  const modalBody = document.getElementById("blogModalBody");
+  if (!modalBody) return;
+
+  if (!window.gamesData || !window.gamesData.sixBySix) {
+    window.gamesData = createDefaultGamesData();
+  }
+
+  const numbers = [];
+  for (let n = 1; n <= 36; n++) numbers.push(n);
+  shuffleArrayInPlace(numbers);
+
+  const isHard = mode === "hard";
+  const durationMs = 40000;
+
+  const game = {
+    type: "sixbysix",
+    mode: isHard ? "hard" : "easy",
+    destroyed: false,
+    numbers,
+    nextExpected: 1,
+    highestReached: 0,
+    startTime: performance.now(),
+    durationMs,
+    rafId: null,
+    wrongTapTimeout: null
+  };
+  setActiveMiniGame(game);
+
+  const cellsHTML = numbers.map((num, idx) => {
+    if (isHard) {
+      return `<div class="sixbysix-cell is-non-interactive" aria-label="${num}"><span class="sixbysix-cell-num">${num}</span></div>`;
+    }
+    return `<button type="button" class="sixbysix-cell" id="sixCell_${idx}" data-six-idx="${idx}" data-six-num="${num}"><span class="sixbysix-cell-num">${num}</span></button>`;
+  }).join("");
+
+  const sixCfg = window.gamesData.sixBySix;
+  const finishStyle = btnStyleAttr(normHex(sixCfg.finishBtnColor || "#41599f"));
+  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+
+  modalBody.innerHTML = `
+    <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+    <div class="blutu-minigame-stage">
+      <div class="minigame-hud-bar is-sixbysix-hud">
+        <div class="minigame-hud-stat is-six-side">
+          <span class="minigame-hud-label">Tiempo</span>
+          <span class="minigame-hud-value" id="sixHudTimer">40.0 s</span>
+        </div>
+        ${isHard ? `
+          <div class="minigame-hud-stat is-center is-six-center">
+            <span class="minigame-hud-label">Modo</span>
+            <span class="minigame-hud-value">Difícil</span>
+          </div>
+          <div class="minigame-hud-spacer" aria-hidden="true"></div>
+        ` : `
+          <div class="minigame-hud-stat is-center is-six-center">
+            <span class="six-hud-big-target" id="sixHudNextNum">1</span>
+          </div>
+          <div class="minigame-hud-spacer" aria-hidden="true"></div>
+        `}
+      </div>
+
+      <div class="sixbysix-grid" id="sixBySixGridEl">
+        ${cellsHTML}
+      </div>
+
+      ${isHard ? `
+        <div style="margin-top:6px;">
+          <button type="button" class="game-custom-btn" style="${finishStyle}" onclick="finishSixBySixHardManual()">Terminar</button>
+        </div>
+      ` : ""}
+    </div>
+  `;
+
+  registerSharedMuteButton("minigameHudMuteBtn");
+
+  if (!isHard) {
+    const gridEl = document.getElementById("sixBySixGridEl");
+    if (gridEl) {
+      let lastHandledTouchTs = 0;
+      const onFastSixInput = (ev) => {
+        if (ev.type === "pointerdown" && ev.button !== undefined && ev.button > 0) return;
+        const cellBtn = ev.target && ev.target.closest ? ev.target.closest(".sixbysix-cell") : null;
+        if (!cellBtn || cellBtn.classList.contains("is-disappeared")) return;
+        const idx = parseInt(cellBtn.getAttribute("data-six-idx") || "-1", 10);
+        const num = parseInt(cellBtn.getAttribute("data-six-num") || "-1", 10);
+        if (!Number.isFinite(idx) || idx < 0 || !Number.isFinite(num) || num < 1) return;
+
+        const nowTs = performance.now();
+        if (ev.type === "click" && (nowTs - lastHandledTouchTs) < 450) return;
+        if (ev.type !== "click") {
+          lastHandledTouchTs = nowTs;
+          if (ev.cancelable) ev.preventDefault();
         }
 
-        const t2 = setTimeout(() => {
-          if (activeMiniGame !== game) return;
-          game.flippedIndices.push(secondPick);
-          setMemoramaCardDomState(secondPick, true, false, null);
-          recordCardInPcMemory(game, secondPick);
-          resolveMemoramaFlippedPair('pc');
-        }, 520);
-        game.aiTimeouts.push(t2);
-      }, 480);
-
-      game.aiTimeouts.push(t1);
-    }
-
-    /* ============================================================================
-       MOTOR 2: 6X6 (REJILLA 6x6 NÚMEROS 1..36, LÍMITE DE 40 SEGUNDOS — FÁCIL Y DIFÍCIL)
-       ============================================================================ */
-    const SIX_BY_SIX_DURATION_MS = 40000;
-
-    export function startSixBySixGame(mode) {
-      destroyActiveMiniGame();
-
-      const modalEl = document.getElementById('blogReadModal');
-      const modalBody = document.getElementById('blogModalBody');
-      const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
-      if (!modalEl || !modalBody) return;
-
-      setCurrentGameBlogKey('sixbysix');
-      if (modalBox) {
-        modalBox.classList.add('is-minigame-active');
-        modalBox.scrollTop = 0;
-      }
-      applyBlogModalAdaptiveTheme(getGamesData().blogs.sixbysix, null);
-
-      const nums = [];
-      for (let n = 1; n <= 36; n++) nums.push(n);
-      const shuffledNums = shuffleGameArray(nums);
-      const isHard = (mode === 'hard');
-
-      activeMiniGame = {
-        type: 'sixbysix',
-        mode: isHard ? 'hard' : 'easy',
-        numbers: shuffledNums,
-        nextExpected: 1,
-        deadlineMs: performance.now() + SIX_BY_SIX_DURATION_MS,
-        timerInterval: null,
-        mismatchTimeout: null,
-        aiTimeouts: []
+        notifySharedGameUserGesture();
+        handleSixBySixCellTap(idx, num);
       };
 
-      const sixCfg = getGamesData().sixBySix || {};
-      const finishBtnStyle = computeGameButtonStyleAttr(sixCfg.finishBtnColor || sixCfg.retryBtnColor || '#41599f');
-
-      const cellsHTML = shuffledNums.map((num, idx) => {
-        if (isHard) {
-          return `<div class="sixbysix-cell is-non-interactive">${num}</div>`;
-        }
-        return `<button type="button" class="sixbysix-cell" data-cell-idx="${idx}" data-num="${num}" onclick="handleSixBySixCellTap(this, ${num})">${num}</button>`;
-      }).join('');
-
-      modalBody.innerHTML = `
-        <div class="blutu-minigame-stage">
-          <div class="minigame-hud-bar">
-            <div class="minigame-hud-stat">
-              <span class="minigame-hud-label">Tiempo</span>
-              <span id="sixHudCountdown" class="minigame-hud-value">40.0 s</span>
-            </div>
-            ${isHard ? `
-              <div class="minigame-hud-stat is-right">
-                <span class="minigame-hud-label">Modo</span>
-                <span class="minigame-hud-value">Difícil</span>
-              </div>
-            ` : `
-              <div class="minigame-hud-stat is-right">
-                <span class="minigame-hud-label">Siguiente</span>
-                <span id="sixHudNextNum" class="minigame-hud-value is-active-turn">1</span>
-              </div>
-            `}
-          </div>
-
-          <div id="sixBySixGridEl" class="sixbysix-grid">
-            ${cellsHTML}
-          </div>
-
-          ${isHard ? `
-            <div style="margin-top: 6px;">
-              <button type="button" class="game-custom-btn" style="${finishBtnStyle}" onclick="finishSixBySixHardMode()">Terminar</button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-
-      activeMiniGame.timerInterval = setInterval(() => {
-        if (!activeMiniGame || activeMiniGame.type !== 'sixbysix') return;
-        const remainingMs = activeMiniGame.deadlineMs - performance.now();
-        if (remainingMs <= 0) {
-          if (activeMiniGame.mode === 'hard') {
-            finishSixBySixHardMode();
-          } else {
-            finishSixBySixEasyMode(false);
-          }
-          return;
-        }
-        const secLeft = (remainingMs / 1000).toFixed(1);
-        const timerEl = document.getElementById('sixHudCountdown');
-        if (timerEl) {
-          timerEl.textContent = `${secLeft} s`;
-          timerEl.classList.toggle('is-danger-time', remainingMs <= 8000);
-        }
-      }, 100);
-    }
-    window.startSixBySixGame = startSixBySixGame;
-
-    export function handleSixBySixCellTap(btnEl, tappedNum) {
-      const game = activeMiniGame;
-      if (!game || game.type !== 'sixbysix' || game.mode !== 'easy' || !btnEl) return;
-
-      if (tappedNum === game.nextExpected) {
-        btnEl.classList.add('is-disappeared');
-        btnEl.disabled = true;
-        game.nextExpected += 1;
-
-        if (game.nextExpected > 36) {
-          finishSixBySixEasyMode(true);
-          return;
-        }
-
-        const nextEl = document.getElementById('sixHudNextNum');
-        if (nextEl) nextEl.textContent = String(game.nextExpected);
+      if (window.PointerEvent) {
+        gridEl.addEventListener("pointerdown", onFastSixInput);
       } else {
-        btnEl.classList.remove('is-wrong-tap');
-        void btnEl.offsetWidth;
-        btnEl.classList.add('is-wrong-tap');
-        setTimeout(() => {
-          if (btnEl && btnEl.isConnected) btnEl.classList.remove('is-wrong-tap');
-        }, 220);
+        gridEl.addEventListener("touchstart", onFastSixInput, { passive: false });
+        gridEl.addEventListener("mousedown", onFastSixInput);
       }
+      gridEl.addEventListener("click", onFastSixInput);
     }
-    window.handleSixBySixCellTap = handleSixBySixCellTap;
+  }
 
-    function finishSixBySixEasyMode(completedAll) {
-      const game = activeMiniGame;
-      const reachedNum = game ? Math.max(0, game.nextExpected - 1) : 0;
+  const tickSix = (now) => {
+    if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+    const remainingMs = Math.max(0, game.durationMs - (now - game.startTime));
+    const timerEl = document.getElementById("sixHudTimer");
+    if (timerEl) {
+      const secs = (remainingMs / 1000).toFixed(1);
+      timerEl.textContent = `${secs} s`;
+      timerEl.classList.toggle("is-danger-time", remainingMs <= 10000);
+    }
 
-      // Desmontar inmediatamente cronómetro y rejilla 6x6
-      teardownActiveMiniGameRuntime();
-      activeMiniGame = null;
+    if (remainingMs <= 0) {
+      finishSixBySixMatch(game, false);
+      return;
+    }
+    game.rafId = requestAnimationFrame(tickSix);
+  };
+  game.rafId = requestAnimationFrame(tickSix);
+}
 
-      const modalBody = document.getElementById('blogModalBody');
-      if (!modalBody) return;
+export function handleSixBySixCellTap(cellIdx, num) {
+  const game = activeMiniGame;
+  if (!game || game.destroyed || game.type !== "sixbysix" || game.mode !== "easy") return;
 
-      const sixCfg = getGamesData().sixBySix || {};
-      const retryStyle = computeGameButtonStyleAttr(sixCfg.retryBtnColor || '#4a63ab');
-      const hardStyle = computeGameButtonStyleAttr(sixCfg.hardBtnColor || '#364d8f');
-      const backStyle = computeGameButtonStyleAttr(sixCfg.backBtnColor || '#1f2b4d');
+  const cellEl = document.getElementById(`sixCell_${cellIdx}`);
+  if (!cellEl || cellEl.classList.contains("is-disappeared")) return;
 
-      const titleHTML = completedAll ? 'Lo lograste' : `Llegaste hasta el número ${reachedNum}`;
-      const subHTML = completedAll
-        ? 'Completaste los 36 números antes de los 40 segundos'
-        : 'Tiempo agotado (40 s)';
+  if (num === game.nextExpected) {
+    game.highestReached = num;
+    game.nextExpected = num + 1;
+    cellEl.classList.add("is-disappeared");
+    cellEl.disabled = true;
+    cellEl.setAttribute("aria-hidden", "true");
+    cellEl.innerHTML = `<img src="blutu_logo.png" alt="" class="sixbysix-cleared-logo" decoding="async">`;
 
-      modalBody.innerHTML = `
-        <div class="minigame-result-panel">
-          <h2 class="minigame-result-title">${escapeHtmlText(titleHTML)}</h2>
-          <p class="minigame-result-subtitle">${escapeHtmlText(subHTML)}</p>
-          <div class="minigame-result-buttons">
-            <div class="minigame-result-primary-row">
-              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="startSixBySixGame('easy')">Reintentar</button>
-              <button type="button" class="game-custom-btn" style="${hardStyle}" onclick="startSixBySixGame('hard')">Difícil</button>
-            </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+    if (game.highestReached >= 36) {
+      finishSixBySixMatch(game, true);
+      return;
+    }
+
+    const nextEl = document.getElementById("sixHudNextNum");
+    if (nextEl) nextEl.textContent = String(game.nextExpected);
+  } else {
+    cellEl.classList.remove("is-wrong-tap");
+    void cellEl.offsetWidth;
+    cellEl.classList.add("is-wrong-tap");
+    if (game.wrongTapTimeout) clearTimeout(game.wrongTapTimeout);
+    game.wrongTapTimeout = setTimeout(() => {
+      if (cellEl) cellEl.classList.remove("is-wrong-tap");
+    }, 220);
+  }
+}
+
+export function finishSixBySixHardManual() {
+  const game = activeMiniGame;
+  if (!game || game.destroyed || game.type !== "sixbysix") return;
+  notifySharedGameUserGesture();
+  finishSixBySixMatch(game, false);
+}
+
+function finishSixBySixMatch(game, completedAll) {
+  const mode = game.mode;
+  const reachedNum = game.highestReached;
+
+  destroyActiveMiniGame(true);
+  window.__isMiniGameScreenOpen = true;
+
+  const modalBody = document.getElementById("blogModalBody");
+  if (!modalBody) return;
+
+  const six = window.gamesData.sixBySix;
+  const easyStyle = btnStyleAttr(normHex(six.easyBtnColor || "#5a74bf"));
+  const hardStyle = btnStyleAttr(normHex(six.hardBtnColor || "#364d8f"));
+  const retryStyle = btnStyleAttr(normHex(six.retryBtnColor || "#4a63ab"));
+  const backStyle = btnStyleAttr(normHex(six.backBtnColor || "#1f2b4d"));
+
+  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+
+  if (mode === "easy") {
+    const titleHTML = completedAll
+      ? `<h2 class="minigame-result-title">Lo lograste</h2>`
+      : `<h2 class="minigame-result-title is-big-score-num">${reachedNum}</h2>`;
+
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="minigame-result-panel">
+        ${titleHTML}
+        <div class="minigame-result-buttons">
+          <div class="minigame-result-primary-row">
+            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Reintentar</button>
+            <button type="button" class="game-custom-btn" style="${hardStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
           </div>
+          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
         </div>
-      `;
-    }
-
-    export function finishSixBySixHardMode() {
-      // Desmontar inmediatamente cronómetro y rejilla 6x6
-      teardownActiveMiniGameRuntime();
-      activeMiniGame = null;
-
-      const modalBody = document.getElementById('blogModalBody');
-      if (!modalBody) return;
-
-      const sixCfg = getGamesData().sixBySix || {};
-      const retryStyle = computeGameButtonStyleAttr(sixCfg.retryBtnColor || '#4a63ab');
-      const easyStyle = computeGameButtonStyleAttr(sixCfg.easyBtnColor || '#5a74bf');
-      const backStyle = computeGameButtonStyleAttr(sixCfg.backBtnColor || '#1f2b4d');
-
-      modalBody.innerHTML = `
-        <div class="minigame-result-panel">
-          <h2 class="minigame-result-title">¿Hasta qué número llegaste?</h2>
-          <div class="minigame-result-buttons">
-            <div class="minigame-result-primary-row">
-              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="startSixBySixGame('hard')">Reintentar</button>
-              <button type="button" class="game-custom-btn" style="${easyStyle}" onclick="startSixBySixGame('easy')">Fácil</button>
-            </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+      </div>
+    `;
+  } else {
+    modalBody.innerHTML = `
+      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
+      <div class="minigame-result-panel">
+        <h2 class="minigame-result-title">¿Hasta qué número llegaste?</h2>
+        <div class="minigame-result-buttons">
+          <div class="minigame-result-primary-row">
+            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Reintentar</button>
+            <button type="button" class="game-custom-btn" style="${easyStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
           </div>
+          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
         </div>
-      `;
-    }
-    window.finishSixBySixHardMode = finishSixBySixHardMode;
+      </div>
+    `;
+  }
+  registerSharedMuteButton("minigameHudMuteBtn");
+}
 
-window.teardownActiveMiniGameRuntime = teardownActiveMiniGameRuntime;
-window.destroyActiveMiniGame = destroyActiveMiniGame;
-window.launchMiniGameFromBlog = launchMiniGameFromBlog;
-window.exitMiniGameVolver = exitMiniGameVolver;
-window.startMemoramaGame = startMemoramaGame;
-window.handleMemoramaCardTap = handleMemoramaCardTap;
-window.startSixBySixGame = startSixBySixGame;
-window.handleSixBySixCellTap = handleSixBySixCellTap;
-window.finishSixBySixHardMode = finishSixBySixHardMode;
+Object.assign(window, {
+  destroyActiveMiniGame,
+  launchMiniGameFromBlog,
+  exitMiniGameVolver,
+  handleMemoramaCardTap,
+  handleSixBySixCellTap,
+  finishSixBySixHardManual
+});

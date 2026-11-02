@@ -884,16 +884,27 @@ try {
 
       activeModalHistoryName = null;
 
-      // 1. Cerrar modal de lectura/edición de Pensamientos (Blog)
+      // 1. Cerrar modal de lectura/edición de Pensamientos o volver al blog del juego si estaba en partida/resultado
       const blogModal = document.getElementById('blogReadModal');
       if (blogModal && blogModal.style.display !== 'none') {
+        if (window.__isMiniGameScreenOpen && currentGameBlogKey && gamesData && gamesData.blogs && gamesData.blogs[currentGameBlogKey]) {
+          const returnGameKey = currentGameBlogKey;
+          if (typeof destroyActiveMiniGame === 'function') destroyActiveMiniGame();
+          window.__isMiniGameScreenOpen = false;
+          openGameBlogModal(returnGameKey);
+          pushModalState('blog');
+          return;
+        }
         if (typeof resetBlogParagraphRevealState === 'function') {
           resetBlogParagraphRevealState(document.getElementById('blogModalBody'));
         }
         if (isAdminMode && typeof syncLiveBlogModalToMemory === 'function') {
           syncLiveBlogModalToMemory(true);
-          renderBlogPosts();
+          if (currentGameBlogKey) renderGamesSection();
+          else renderBlogPosts();
         }
+        currentBlogIndex = null;
+        currentGameBlogKey = null;
         blogModal.style.display = 'none';
         document.body.style.overflow = '';
       }
@@ -1742,11 +1753,22 @@ try {
       const body = document.getElementById('blogModalBody');
       const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
       const wasGameBlog = Boolean(currentGameBlogKey);
-      const wasPlayingMiniGame = Boolean(window.activeMiniGame);
+      const wasInMiniGameScreen = Boolean(window.__isMiniGameScreenOpen || window.activeMiniGame);
+
+      if (wasInMiniGameScreen && wasGameBlog && gamesData && gamesData.blogs && gamesData.blogs[currentGameBlogKey]) {
+        const returnGameKey = currentGameBlogKey;
+        if (typeof destroyActiveMiniGame === 'function') {
+          destroyActiveMiniGame();
+        }
+        window.__isMiniGameScreenOpen = false;
+        openGameBlogModal(returnGameKey);
+        return;
+      }
 
       if (typeof destroyActiveMiniGame === 'function') {
         destroyActiveMiniGame();
       }
+      window.__isMiniGameScreenOpen = false;
       if (modalBox) {
         modalBox.classList.remove('is-minigame-active');
       }
@@ -1754,13 +1776,15 @@ try {
       resetBlogParagraphRevealState(body);
       resetBlogModalAdaptiveTheme();
       const wasOpen = modal && modal.style.display !== 'none';
-      if (!skipSync && wasOpen && isAdminMode && !wasPlayingMiniGame && typeof syncLiveBlogModalToMemory === 'function') {
+      if (!skipSync && wasOpen && isAdminMode && !wasInMiniGameScreen && typeof syncLiveBlogModalToMemory === 'function') {
         syncLiveBlogModalToMemory(true);
         if (wasGameBlog) {
           if (typeof renderGamesSection === 'function') renderGamesSection();
+          if (typeof window.persistSiteDataInRealtime === 'function') window.persistSiteDataInRealtime(true);
         } else {
           if (typeof renderBlogPosts === 'function') renderBlogPosts();
           if (typeof renderAdminPostsList === 'function') renderAdminPostsList();
+          if (typeof window.persistSiteDataInRealtime === 'function') window.persistSiteDataInRealtime(true);
         }
       }
       currentBlogIndex = null;
@@ -1897,10 +1921,10 @@ try {
         const blogObj = gamesData.blogs[spec.key] || {};
         const displayTitle = (blogObj.title && blogObj.title.trim()) ? blogObj.title.trim() : spec.defaultTitle;
         const imgSrc = (blogObj.image && blogObj.image.trim()) ? blogObj.image.trim() : buildGameCardFallbackSvg(spec.key);
-        const fitInfo = typeof getPostThumbRenderConfig === 'function'
-          ? getPostThumbRenderConfig(blogObj.imageFit)
-          : { isCrop: false, style: 'object-fit: cover; object-position: center center;', axisAttr: '' };
-        const thumbClasses = fitInfo.isCrop ? 'blog-thumb blog-thumb-cropped' : 'blog-thumb';
+        const parsedFit = parsePostImageCrop(blogObj.imageFit || 'cover-center');
+        const fitStyle = getFitCssForPost(blogObj.imageFit || 'cover-center');
+        const cropAttrs = parsedFit.isCrop ? `data-crop-z="${parsedFit.z.toFixed(3)}" onload="syncBlogCroppedThumbCover(this)"` : '';
+        const thumbClasses = parsedFit.isCrop ? 'blog-thumb blog-thumb-cropped' : 'blog-thumb';
         const parityClass = spec.isEven ? 'even-preview has-thumb img-right' : 'odd-preview has-thumb img-left';
         const fallbackAttr = escapeHtmlAttr(buildGameCardFallbackSvg(spec.key));
 
@@ -1909,14 +1933,13 @@ try {
           return `
             <article class="blog-article ${parityClass}" role="button" tabindex="0" onclick="openGameBlogModal('${spec.key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGameBlogModal('${spec.key}');}" title="Toca para editar el blog y opciones de ${escapeHtmlAttr(displayTitle)}">
               <div class="blog-thumb-frame blog-thumb-admin-wrap" onclick="event.stopPropagation(); ${hasRealCover ? `openBlogThumbCropModal('game:${spec.key}')` : `openGameBlogModal('${spec.key}')`}" title="${hasRealCover ? 'Recortar miniatura' : 'Abrir editor para elegir portada'}">
-                <img src="${escapeHtmlAttr(imgSrc)}" alt="${escapeHtmlAttr(displayTitle)}" class="${thumbClasses}" loading="lazy" decoding="async" referrerpolicy="no-referrer" ${fitInfo.axisAttr || ''} style="${fitInfo.style}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallbackAttr}';}">
+                <img src="${escapeHtmlAttr(imgSrc)}" alt="${escapeHtmlAttr(displayTitle)}" class="${thumbClasses}" loading="lazy" decoding="async" referrerpolicy="no-referrer" ${cropAttrs} style="${fitStyle}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallbackAttr}';}">
                 <span class="blog-thumb-crop-hint">${hasRealCover ? '✂️' : '🖼️'}</span>
               </div>
               <div class="blog-content">
                 <div class="blog-card-top">
                   <h3>${formatPreviewTitleUnbroken(displayTitle)}</h3>
-                  <div class="blog-meta-row">
-                    <span class="date">${escapeHtmlText(blogObj.date || '')}</span>
+                  <div class="blog-meta-row" style="justify-content:flex-end;">
                     <span class="blog-preview-arrow" aria-hidden="true"><i class="fa-solid fa-pen-to-square" style="font-size:0.82rem;margin-right:4px;"></i><i class="fa-solid fa-arrow-right-long"></i></span>
                   </div>
                 </div>
@@ -1928,13 +1951,12 @@ try {
         return `
           <article class="blog-article ${parityClass}" role="button" tabindex="0" onclick="triggerGameBlogOpen('${spec.key}', this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();triggerGameBlogOpen('${spec.key}', this);}">
             <div class="blog-thumb-frame">
-              <img src="${escapeHtmlAttr(imgSrc)}" alt="${escapeHtmlAttr(displayTitle)}" class="${thumbClasses}" loading="lazy" decoding="async" referrerpolicy="no-referrer" ${fitInfo.axisAttr || ''} style="${fitInfo.style}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallbackAttr}';}">
+              <img src="${escapeHtmlAttr(imgSrc)}" alt="${escapeHtmlAttr(displayTitle)}" class="${thumbClasses}" loading="lazy" decoding="async" referrerpolicy="no-referrer" ${cropAttrs} style="${fitStyle}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallbackAttr}';}">
             </div>
             <div class="blog-content">
               <div class="blog-card-top">
                 <h3>${formatPreviewTitleUnbroken(displayTitle)}</h3>
-                <div class="blog-meta-row">
-                  <span class="date">${escapeHtmlText(blogObj.date || '')}</span>
+                <div class="blog-meta-row" style="justify-content:flex-end;">
                   <span class="blog-preview-arrow" aria-hidden="true"><i class="fa-solid fa-arrow-right-long"></i></span>
                 </div>
               </div>
@@ -2028,8 +2050,13 @@ try {
 
       if (gameKey === 'memorama') {
         const mem = gamesData.memorama;
+        if (!Array.isArray(mem.pairCrops)) {
+          mem.pairCrops = Array(10).fill('cover-center');
+        }
         const soloHex = normalizeCssColorToHex(mem.soloBtnColor || '#5a74bf') || '#5a74bf';
         const vsPcHex = normalizeCssColorToHex(mem.vsPcBtnColor || '#364d8f') || '#364d8f';
+        const vsPcEasyHex = normalizeCssColorToHex(mem.vsPcEasyBtnColor || '#4b67b3') || '#4b67b3';
+        const vsPcHardHex = normalizeCssColorToHex(mem.vsPcHardBtnColor || '#2b3e78') || '#2b3e78';
         const retryHex = normalizeCssColorToHex(mem.retryBtnColor || '#4a63ab') || '#4a63ab';
         const backHex = normalizeCssColorToHex(mem.backBtnColor || '#1f2b4d') || '#1f2b4d';
 
@@ -2041,12 +2068,21 @@ try {
 
           const slotsHTML = mem.pairImages.slice(0, 10).map((imgUrl, idx) => {
             const fbSvg = escapeHtmlAttr(buildDefaultGothicCardSvgDataUri(String(idx + 1), '#8ca2e6'));
+            const pairCropVal = (Array.isArray(mem.pairCrops) && mem.pairCrops[idx]) ? mem.pairCrops[idx] : 'cover-center';
+            const parsedCrop = parsePostImageCrop(pairCropVal);
+            const thumbFitStyle = getFitCssForPost(pairCropVal);
+            const cropAttrs = parsedCrop.isCrop ? ` data-crop-z="${parsedCrop.z.toFixed(3)}" onload="syncBlogCroppedThumbCover(this)"` : '';
+            const cropImgClass = parsedCrop.isCrop ? 'memorama-pair-slot-img blog-thumb-cropped' : 'memorama-pair-slot-img';
             return `
               <div class="memorama-pair-slot-card">
-                <img id="memoramaPairThumb_${idx}" src="${escapeHtmlAttr(imgUrl)}" alt="Pareja ${idx + 1}" class="memorama-pair-slot-thumb" referrerpolicy="no-referrer" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fbSvg}';}">
+                <div class="memorama-pair-slot-thumb-frame" onclick="openBlogThumbCropModal('memorama-pair:${idx}')" title="Toca para ajustar encuadre y zoom de Pareja #${idx + 1}">
+                  <img id="memoramaPairThumb_${idx}" src="${escapeHtmlAttr(imgUrl)}" alt="Pareja ${idx + 1}" class="${cropImgClass}" referrerpolicy="no-referrer"${cropAttrs} style="${thumbFitStyle}" onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fbSvg}';}">
+                  <span class="memorama-pair-crop-badge" aria-hidden="true">✂️</span>
+                </div>
                 <div class="memorama-pair-slot-controls">
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
                     <span style="font-family:'Cinzel',serif;font-size:0.72rem;color:var(--accent-light);">Pareja #${idx + 1}</span>
+                    <button type="button" class="memorama-pair-mini-btn" onclick="openBlogThumbCropModal('memorama-pair:${idx}')" title="Ajustar encuadre detallado">✂️ Encuadre</button>
                   </div>
                   <input type="text" id="memoramaPairInput_${idx}" value="${escapeHtmlAttr(imgUrl.startsWith('data:') ? '' : imgUrl)}" placeholder="${imgUrl.startsWith('data:') ? 'Imagen subida desde dispositivo (pega URL para cambiar)' : 'URL de imagen...'}" oninput="handleMemoramaPairUrlInput(${idx}, this.value)">
                   <div class="memorama-pair-slot-btn-row">
@@ -2066,7 +2102,7 @@ try {
           adminPanelHTML = `
             <div class="game-admin-config-panel" contenteditable="false">
               <h4 class="game-admin-config-title">🃏 10 Imágenes de Parejas (Memorama 4×5)</h4>
-              <p style="font-size:0.84rem;color:var(--text-muted);text-align:center;margin:0 0 10px 0;">Escoge las 10 imágenes subiendo desde tu celular/PC, eligiendo de la galería o pegando su enlace.</p>
+              <p style="font-size:0.84rem;color:var(--text-muted);text-align:center;margin:0 0 10px 0;">Escoge las 10 imágenes y toca cada miniatura o <strong>✂️ Encuadre</strong> para acercar, alejar y mover el recorte exacto de la carta.</p>
               <div class="memorama-pairs-editor-grid">
                 ${slotsHTML}
               </div>
@@ -2080,6 +2116,14 @@ try {
                 <label class="game-admin-color-item">
                   <span>Vs PC</span>
                   <input type="color" value="${escapeHtmlAttr(vsPcHex)}" oninput="updateGameButtonColorLive('memorama', 'vsPcBtnColor', this.value)">
+                </label>
+                <label class="game-admin-color-item">
+                  <span>Vs PC Fácil</span>
+                  <input type="color" value="${escapeHtmlAttr(vsPcEasyHex)}" oninput="updateGameButtonColorLive('memorama', 'vsPcEasyBtnColor', this.value)">
+                </label>
+                <label class="game-admin-color-item">
+                  <span>Vs PC Difícil</span>
+                  <input type="color" value="${escapeHtmlAttr(vsPcHardHex)}" oninput="updateGameButtonColorLive('memorama', 'vsPcHardBtnColor', this.value)">
                 </label>
                 <label class="game-admin-color-item">
                   <span>Reintentar</span>
@@ -2099,7 +2143,11 @@ try {
           <div class="game-blog-actions-stack" contenteditable="false">
             <div class="game-blog-modes-row">
               <button type="button" id="memoramaSoloLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(soloHex)}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
-              <button type="button" id="memoramaVsPcLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(vsPcHex)}" onclick="launchMiniGameFromBlog('memorama', 'vspc')">Vs PC</button>
+              <button type="button" id="memoramaVsPcLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(vsPcHex)}" onclick="toggleMemoramaVsPcDifficultyRow('blogVsPcDiffRow')">Vs PC</button>
+            </div>
+            <div id="blogVsPcDiffRow" class="game-blog-vspc-subrow" style="display:none;">
+              <button type="button" id="memoramaVsPcEasyLaunchBtn" class="game-custom-btn is-submode-btn" style="${computeGameButtonStyleAttr(vsPcEasyHex)}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
+              <button type="button" id="memoramaVsPcHardLaunchBtn" class="game-custom-btn is-submode-btn" style="${computeGameButtonStyleAttr(vsPcHardHex)}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
             </div>
             <button type="button" id="gameBlogBackActionBtn" class="game-custom-btn is-volver-btn" style="${computeGameButtonStyleAttr(backHex)}" onclick="${inAdminEditor ? 'finishInlineBlogEdit()' : 'closeBlogModal()'}">Volver</button>
           </div>
@@ -2161,6 +2209,7 @@ try {
       }
 
       destroyActiveMiniGame();
+      window.__isMiniGameScreenOpen = false;
       currentBlogIndex = null;
       currentGameBlogKey = gameKey;
 
@@ -2194,14 +2243,7 @@ try {
             </div>
           </div>
 
-          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del blog..." oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
-
-          <div style="text-align: center; margin-bottom: 22px;">
-            <span class="modal-date modal-date-editable" style="margin-bottom: 0;" title="Haz clic para cambiar la fecha">
-              <span id="blogLiveDateText">${escapeHtmlText(post.date || formatIsoToSpanishDate(post.dateIso || ''))}</span>
-              <input type="date" id="blogLiveDateIso" class="modal-date-native-picker" value="${escapeHtmlAttr(post.dateIso || '')}" onchange="handleLiveBlogDateChange(this.value)" onclick="if(this.showPicker){try{this.showPicker();}catch(err){}}">
-            </span>
-          </div>
+          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del blog..." style="margin-bottom:18px;" oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
 
           <div id="blogLiveCoverContainer">
             ${renderLiveCoverSectionHTML(post)}
@@ -2215,12 +2257,14 @@ try {
         `;
 
         setupLiveBlogEditableBodyEvents();
+        requestAnimationFrame(() => {
+          modalBody.querySelectorAll('img.blog-thumb-cropped').forEach(syncBlogCroppedThumbCover);
+        });
       } else {
         const formattedContentHTML = renderBlogArticleBodyHTML(post.content || '', false);
 
         modalBody.innerHTML = `
-          <h1>${formatPreviewTitleUnbroken(post.title)}</h1>
-          <span class="modal-date">${escapeHtmlText(post.date || '')}</span>
+          <h1 style="margin-bottom:18px;">${formatPreviewTitleUnbroken(post.title)}</h1>
           ${post.image ? `
             <figure class="main-img-figure">
               <img src="${escapeHtmlAttr(post.image)}" class="main-img" ${post.imageAura ? `data-aura="${escapeHtmlAttr(post.imageAura)}"` : ''} alt="${escapeHtmlAttr(post.title || '')}">
@@ -2266,6 +2310,8 @@ try {
         const mapIds = {
           soloBtnColor: 'memoramaSoloLaunchBtn',
           vsPcBtnColor: 'memoramaVsPcLaunchBtn',
+          vsPcEasyBtnColor: 'memoramaVsPcEasyLaunchBtn',
+          vsPcHardBtnColor: 'memoramaVsPcHardLaunchBtn',
           backBtnColor: 'gameBlogBackActionBtn'
         };
         const targetId = mapIds[propName];
@@ -2291,15 +2337,43 @@ try {
     }
     window.updateGameButtonColorLive = updateGameButtonColorLive;
 
+    function toggleMemoramaVsPcDifficultyRow(rowId) {
+      const targetRow = document.getElementById(rowId || 'blogVsPcDiffRow');
+      if (!targetRow) return;
+      const isHidden = targetRow.style.display === 'none' || !targetRow.style.display;
+      targetRow.style.display = isHidden ? 'flex' : 'none';
+    }
+    window.toggleMemoramaVsPcDifficultyRow = toggleMemoramaVsPcDifficultyRow;
+
+    function applyMemoramaPairThumbCropInEditor(slotIndex) {
+      const thumbEl = document.getElementById(`memoramaPairThumb_${slotIndex}`);
+      if (!thumbEl || !gamesData || !gamesData.memorama) return;
+      const cropVal = (Array.isArray(gamesData.memorama.pairCrops) && gamesData.memorama.pairCrops[slotIndex])
+        ? gamesData.memorama.pairCrops[slotIndex]
+        : 'cover-center';
+      const parsed = parsePostImageCrop(cropVal);
+      thumbEl.className = parsed.isCrop ? 'memorama-pair-slot-img blog-thumb-cropped' : 'memorama-pair-slot-img';
+      thumbEl.setAttribute('style', getFitCssForPost(cropVal));
+      if (parsed.isCrop) {
+        thumbEl.setAttribute('data-crop-z', parsed.z.toFixed(3));
+        syncBlogCroppedThumbCover(thumbEl);
+      } else {
+        thumbEl.removeAttribute('data-crop-z');
+      }
+    }
+
     function handleMemoramaPairUrlInput(slotIndex, rawVal) {
       if (slotIndex < 0 || slotIndex >= 10) return;
       const trimmed = String(rawVal || '').trim();
       if (!trimmed) return;
       gamesData.memorama.pairImages[slotIndex] = trimmed;
+      if (!Array.isArray(gamesData.memorama.pairCrops)) gamesData.memorama.pairCrops = Array(10).fill('cover-center');
+      gamesData.memorama.pairCrops[slotIndex] = 'cover-center';
       const thumbEl = document.getElementById(`memoramaPairThumb_${slotIndex}`);
       if (thumbEl) {
         thumbEl.dataset.fb = '0';
         thumbEl.src = trimmed;
+        applyMemoramaPairThumbCropInEditor(slotIndex);
       }
       schedulePersistGamesLocalCache();
     }
@@ -2308,10 +2382,13 @@ try {
     function handleMemoramaPairGalleryPick(slotIndex, urlVal) {
       if (slotIndex < 0 || slotIndex >= 10 || !urlVal) return;
       gamesData.memorama.pairImages[slotIndex] = urlVal;
+      if (!Array.isArray(gamesData.memorama.pairCrops)) gamesData.memorama.pairCrops = Array(10).fill('cover-center');
+      gamesData.memorama.pairCrops[slotIndex] = 'cover-center';
       const thumbEl = document.getElementById(`memoramaPairThumb_${slotIndex}`);
       if (thumbEl) {
         thumbEl.dataset.fb = '0';
         thumbEl.src = urlVal;
+        applyMemoramaPairThumbCropInEditor(slotIndex);
       }
       const inputEl = document.getElementById(`memoramaPairInput_${slotIndex}`);
       if (inputEl) {
@@ -2369,10 +2446,13 @@ try {
       try {
         const compressedDataUrl = await compressPairImageFileToDataUrl(file, 260, 0.78);
         gamesData.memorama.pairImages[slotIndex] = compressedDataUrl;
+        if (!Array.isArray(gamesData.memorama.pairCrops)) gamesData.memorama.pairCrops = Array(10).fill('cover-center');
+        gamesData.memorama.pairCrops[slotIndex] = 'cover-center';
         const thumbEl = document.getElementById(`memoramaPairThumb_${slotIndex}`);
         if (thumbEl) {
           thumbEl.dataset.fb = '0';
           thumbEl.src = compressedDataUrl;
+          applyMemoramaPairThumbCropInEditor(slotIndex);
         }
         const urlInputEl = document.getElementById(`memoramaPairInput_${slotIndex}`);
         if (urlInputEl) {
@@ -4490,8 +4570,8 @@ try {
       const panel = document.getElementById('editPostPanel');
       if (!panel) return;
       panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
-      if (panel.style.display === 'block' && typeof populateEditPostSelect === 'function') {
-        populateEditPostSelect();
+      if (panel.style.display === 'block' && typeof window.populateEditPostSelect === 'function') {
+        window.populateEditPostSelect();
       }
     }
 
@@ -5072,11 +5152,20 @@ try {
       const vp = document.getElementById('thumbCropViewport');
       const stage = document.getElementById('thumbCropStage');
       if (!vp) return;
+      const stageW = (stage && stage.clientWidth > 60) ? (stage.clientWidth - 20) : Math.max(180, (window.innerWidth || 390) - 72);
+      const stageH = (stage && stage.clientHeight > 60) ? (stage.clientHeight - 20) : 204;
+
+      if (thumbCropState.targetMode === 'memorama-pair') {
+        const side = Math.max(110, Math.min(200, stageW, stageH));
+        vp.style.aspectRatio = '1 / 1';
+        vp.style.width = `${Math.round(side)}px`;
+        vp.style.height = `${Math.round(side)}px`;
+        return;
+      }
+
       const target = computeExactUserBlogThumbSize();
       let w = target.width;
       let h = target.height;
-      const stageW = (stage && stage.clientWidth > 60) ? (stage.clientWidth - 20) : Math.max(180, (window.innerWidth || 390) - 72);
-      const stageH = (stage && stage.clientHeight > 60) ? (stage.clientHeight - 20) : 204;
       const scale = Math.min(1, stageW / Math.max(1, w), stageH / Math.max(1, h));
       w = Math.max(80, Math.round(w * scale));
       h = Math.max(60, Math.round(h * scale));
@@ -5342,6 +5431,21 @@ try {
         thumbCropState.postIndex = currentBlogIndex;
         thumbCropState.gameKey = currentGameBlogKey || null;
         initialFit = (imgUrl === pendingModalCoverOriginalUrl) ? (pendingModalCoverImageFit || 'cover-center') : (pendingModalCoverImageFit.startsWith('crop:') ? pendingModalCoverImageFit : 'cover-center');
+      } else if (typeof targetIndexOrMode === 'string' && targetIndexOrMode.startsWith('memorama-pair:')) {
+        const slotIdx = parseInt(targetIndexOrMode.slice(14), 10);
+        if (!Number.isFinite(slotIdx) || slotIdx < 0 || slotIdx >= 10 || !gamesData || !gamesData.memorama) return;
+        imgUrl = String(gamesData.memorama.pairImages[slotIdx] || '').trim();
+        if (!imgUrl) {
+          showToastNotification('Primero selecciona o sube una imagen para esta pareja.', true);
+          return;
+        }
+        if (!Array.isArray(gamesData.memorama.pairCrops)) {
+          gamesData.memorama.pairCrops = Array(10).fill('cover-center');
+        }
+        thumbCropState.targetMode = 'memorama-pair';
+        thumbCropState.postIndex = slotIdx;
+        thumbCropState.gameKey = 'memorama';
+        initialFit = gamesData.memorama.pairCrops[slotIdx] || 'cover-center';
       } else if (typeof targetIndexOrMode === 'string' && targetIndexOrMode.startsWith('game:')) {
         const gKey = targetIndexOrMode.slice(5);
         if (!gamesData || !gamesData.blogs || !gamesData.blogs[gKey]) return;
@@ -5378,19 +5482,23 @@ try {
 
       if (vpEl) {
         let isRightThumb = false;
-        if (thumbCropState.targetMode === 'game' || (thumbCropState.targetMode === 'modal-cover' && thumbCropState.gameKey)) {
-          isRightThumb = (thumbCropState.gameKey === 'sixbysix');
-        } else {
-          const targetPost = (thumbCropState.postIndex !== null && thumbCropState.postIndex !== undefined) ? postsData[thumbCropState.postIndex] : null;
-          if (targetPost) {
-            const sortedVis = [...getVisibleBlogPosts()].sort((a, b) => new Date(b.dateIso) - new Date(a.dateIso));
-            const sortedIdx = sortedVis.indexOf(targetPost);
-            if (sortedIdx !== -1) {
-              isRightThumb = (sortedIdx % 2 === 1);
+        const isSquareCard = (thumbCropState.targetMode === 'memorama-pair');
+        if (!isSquareCard) {
+          if (thumbCropState.targetMode === 'game' || (thumbCropState.targetMode === 'modal-cover' && thumbCropState.gameKey)) {
+            isRightThumb = (thumbCropState.gameKey === 'sixbysix');
+          } else {
+            const targetPost = (thumbCropState.postIndex !== null && thumbCropState.postIndex !== undefined) ? postsData[thumbCropState.postIndex] : null;
+            if (targetPost) {
+              const sortedVis = [...getVisibleBlogPosts()].sort((a, b) => new Date(b.dateIso) - new Date(a.dateIso));
+              const sortedIdx = sortedVis.indexOf(targetPost);
+              if (sortedIdx !== -1) {
+                isRightThumb = (sortedIdx % 2 === 1);
+              }
             }
           }
         }
         vpEl.classList.toggle('is-fade-left', isRightThumb);
+        vpEl.classList.toggle('is-square-card-crop', isSquareCard);
       }
 
       ensureThumbCropGestureListeners();
@@ -5481,6 +5589,26 @@ try {
         if (typeof showToastNotification === 'function') {
           showToastNotification('✂️ Recorte de miniatura listo');
         }
+        return;
+      }
+
+      if (thumbCropState.targetMode === 'memorama-pair') {
+        const slotIdx = thumbCropState.postIndex;
+        if (Number.isFinite(slotIdx) && slotIdx >= 0 && slotIdx < 10 && gamesData && gamesData.memorama) {
+          if (!Array.isArray(gamesData.memorama.pairCrops)) {
+            gamesData.memorama.pairCrops = Array(10).fill('cover-center');
+          }
+          gamesData.memorama.pairCrops[slotIdx] = cropVal;
+          applyMemoramaPairThumbCropInEditor(slotIdx);
+          persistGamesLocalCache();
+          if (typeof window.persistSiteDataInRealtime === 'function') {
+            window.persistSiteDataInRealtime();
+          }
+          if (typeof showToastNotification === 'function') {
+            showToastNotification(`✂️ Encuadre de Pareja #${slotIdx + 1} guardado`);
+          }
+        }
+        closeBlogThumbCropModal();
         return;
       }
 
@@ -10788,8 +10916,6 @@ try {
             setTimeout(() => {
               if (typeof updateBlogTrackPosition === 'function') {
                 updateBlogTrackPosition();
-              } else if (typeof updateBlogSliderPositions === 'function') {
-                updateBlogSliderPositions();
               }
               document.querySelectorAll('#blogSliderTrack img.blog-thumb-cropped').forEach(syncBlogCroppedThumbCover);
             }, 80);
@@ -11229,8 +11355,10 @@ Object.assign(window, {
   triggerGameBlogOpen,
   collectAvailableSiteGalleryImagesForPicker,
   renderGameBlogBottomControlsHTML,
+  toggleMemoramaVsPcDifficultyRow,
   openGameBlogModal,
   updateGameButtonColorLive,
+  applyMemoramaPairThumbCropInEditor,
   handleMemoramaPairUrlInput,
   handleMemoramaPairGalleryPick,
   compressPairImageFileToDataUrl,

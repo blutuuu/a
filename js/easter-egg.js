@@ -1,236 +1,24 @@
 /* Blutu — Easter Egg Dino + Música Escaleras (100% Carga Bajo Demanda) */
+import {
+  preloadSharedGameMusicApi,
+  startSharedGameMusic,
+  notifySharedGameUserGesture,
+  isSharedGameMusicMuted,
+  pauseSharedGameMusicTemporary,
+  toggleSharedGameMute,
+  stopAndDestroySharedGameMusic
+} from "./game-audio.js";
+
+// Pre-cargar la API del reproductor cuando el usuario pasa el dedo o el cursor por el logo (sin iniciar audio ni red pesada)
+preloadSharedGameMusicApi();
+
     const getLogoBtn = () => document.getElementById('logoBtn');
     let logoBtn = getLogoBtn();
-    const GAME_YOUTUBE_MUSIC_URL = 'https://music.youtube.com/watch?v=3Ea5h9Xqe3E';
-    const GAME_YOUTUBE_VIDEO_ID = '3Ea5h9Xqe3E';
-    const GAME_ITUNES_TRACK_ID = '6773560493';
-    const GAME_DIRECT_AUDIO_URL = 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/ec/fb/45/ecfb4526-93d2-03e7-c901-a297111f1458/mzaf_14659704648749163645.plus.aac.p.m4a';
-    const GAME_SILENT_WAV_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
     let blutuEgg = null;
-    let blutuWebAudioUnlockCtx = null;
-
-    function isRestrictedInAppWebView() {
-      const ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
-      if (!ua) return false;
-      if (/Instagram|Barcelona|FBAN|FBAV|FB_IAB|FBIOS|FBSS|Musical_ly|BytedanceWebview|TikTok|Snapchat|Line\/|LinkedInApp|WhatsApp|Twitter/i.test(ua)) {
-        return true;
-      }
-      if (/;\s*wv\)/i.test(ua)) {
-        return true;
-      }
-      if (/(iPhone|iPod|iPad).*AppleWebKit(?!.*Safari)/i.test(ua)) {
-        return true;
-      }
-      return false;
-    }
-
-    function unlockBlutuWebViewAudioSession() {
-      try {
-        if (navigator && navigator.audioSession && navigator.audioSession.type !== 'playback') {
-          navigator.audioSession.type = 'playback';
-        }
-      } catch (e) {}
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        if (!blutuWebAudioUnlockCtx) {
-          blutuWebAudioUnlockCtx = new AudioCtx();
-        }
-        if (blutuWebAudioUnlockCtx.state === 'suspended') {
-          blutuWebAudioUnlockCtx.resume().catch(() => {});
-        }
-        if (!blutuWebAudioUnlockCtx._blutuPrimed) {
-          const buf = blutuWebAudioUnlockCtx.createBuffer(1, 1, 22050);
-          const src = blutuWebAudioUnlockCtx.createBufferSource();
-          src.buffer = buf;
-          src.connect(blutuWebAudioUnlockCtx.destination);
-          if (typeof src.start === 'function') src.start(0);
-          blutuWebAudioUnlockCtx._blutuPrimed = true;
-        }
-      } catch (e) {}
-    }
-
-    function sendYouTubeCommandFallback(funcName, argsArr) {
-      const iframeEl = document.getElementById('yt-player');
-      if (iframeEl && iframeEl.contentWindow) {
-        try {
-          iframeEl.contentWindow.postMessage(JSON.stringify({
-            event: 'listening',
-            id: 'yt-player',
-            channel: 'widget'
-          }), '*');
-          iframeEl.contentWindow.postMessage(JSON.stringify({
-            event: 'command',
-            func: funcName,
-            args: argsArr || []
-          }), '*');
-        } catch (e) {}
-      }
-    }
-
-    function activateBlutuDirectAudioFallback() {
-      if (!blutuEgg || !blutuEgg.isOpen) return;
-      blutuEgg.usingDirectAudio = true;
-
-      if (blutuEgg.ytFallbackTimer) {
-        clearTimeout(blutuEgg.ytFallbackTimer);
-        blutuEgg.ytFallbackTimer = null;
-      }
-
-      if (blutuEgg.ytPlayer) {
-        try {
-          if (typeof blutuEgg.ytPlayer.mute === 'function') blutuEgg.ytPlayer.mute();
-          if (typeof blutuEgg.ytPlayer.pauseVideo === 'function') blutuEgg.ytPlayer.pauseVideo();
-          if (typeof blutuEgg.ytPlayer.destroy === 'function') blutuEgg.ytPlayer.destroy();
-        } catch (e) {}
-        blutuEgg.ytPlayer = null;
-        blutuEgg.isYtReady = false;
-      }
-      const ytContainer = document.getElementById('yt-player-container');
-      if (ytContainer) ytContainer.remove();
-
-      let audioEl = blutuEgg.directAudio;
-      if (!audioEl) {
-        audioEl = window.__blutuPrimedGestureAudio || new Audio();
-        window.__blutuPrimedGestureAudio = null;
-        audioEl.id = 'blutu-direct-audio';
-        audioEl.loop = true;
-        audioEl.preload = 'auto';
-        audioEl.playsInline = true;
-        audioEl.setAttribute('playsinline', '');
-        audioEl.setAttribute('webkit-playsinline', '');
-        blutuEgg.directAudio = audioEl;
-      }
-
-      attachBlutuDirectAudioRecovery(audioEl);
-
-      const targetSrc = blutuEgg.resolvedDirectAudioUrl || GAME_DIRECT_AUDIO_URL;
-      if (!audioEl.src || audioEl.src === GAME_SILENT_WAV_URI || audioEl.src.indexOf('data:audio/') === 0) {
-        audioEl.src = targetSrc;
-      }
-      audioEl.loop = true;
-      audioEl.volume = 0.85;
-      audioEl.muted = !!blutuEgg.isMuted;
-
-      if (!blutuEgg.isMuted) {
-        const playPromise = audioEl.play();
-        if (playPromise && typeof playPromise.catch === 'function') {
-          playPromise.catch(() => {});
-        }
-      }
-    }
-
-    function attachBlutuDirectAudioRecovery(audioEl) {
-      if (!audioEl || audioEl._blutuRecoveryBound) return;
-      audioEl._blutuRecoveryBound = true;
-
-      audioEl.addEventListener('error', () => {
-        if (!blutuEgg || !blutuEgg.isOpen || !blutuEgg.usingDirectAudio) return;
-
-        if (!blutuEgg.blobFallbackTried) {
-          blutuEgg.blobFallbackTried = true;
-          const srcToFetch = blutuEgg.resolvedDirectAudioUrl || GAME_DIRECT_AUDIO_URL;
-          fetch(srcToFetch, { mode: 'cors', credentials: 'omit' })
-            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status))))
-            .then((buf) => {
-              if (!blutuEgg || !blutuEgg.isOpen || !blutuEgg.directAudio) return;
-              if (blutuEgg.directAudioBlobUrl) {
-                try { URL.revokeObjectURL(blutuEgg.directAudioBlobUrl); } catch (e) {}
-              }
-              const blob = new Blob([buf], { type: 'audio/mp4' });
-              const blobUrl = URL.createObjectURL(blob);
-              blutuEgg.directAudioBlobUrl = blobUrl;
-              blutuEgg.directAudio.src = blobUrl;
-              blutuEgg.directAudio.loop = true;
-              blutuEgg.directAudio.volume = 0.85;
-              blutuEgg.directAudio.muted = !!blutuEgg.isMuted;
-              if (!blutuEgg.isMuted) {
-                const p = blutuEgg.directAudio.play();
-                if (p && typeof p.catch === 'function') p.catch(() => {});
-              }
-            })
-            .catch(() => {
-              triggerItunesLookupAudioRecovery();
-            });
-          return;
-        }
-
-        triggerItunesLookupAudioRecovery();
-      });
-    }
-
-    function triggerItunesLookupAudioRecovery() {
-      if (!blutuEgg || blutuEgg.lookupFallbackTried) return;
-      blutuEgg.lookupFallbackTried = true;
-      fetch('https://itunes.apple.com/lookup?id=' + GAME_ITUNES_TRACK_ID + '&entity=song', { mode: 'cors', credentials: 'omit' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!blutuEgg || !blutuEgg.isOpen || !blutuEgg.directAudio || !data || !Array.isArray(data.results)) return;
-          const match = data.results.find((item) => item && item.previewUrl);
-          if (match && match.previewUrl) {
-            blutuEgg.resolvedDirectAudioUrl = match.previewUrl;
-            blutuEgg.directAudio.src = match.previewUrl;
-            blutuEgg.directAudio.loop = true;
-            blutuEgg.directAudio.volume = 0.85;
-            blutuEgg.directAudio.muted = !!blutuEgg.isMuted;
-            if (!blutuEgg.isMuted) {
-              const p = blutuEgg.directAudio.play();
-              if (p && typeof p.catch === 'function') p.catch(() => {});
-            }
-          }
-        })
-        .catch(() => {});
-    }
-
-    function pauseBlutuGameMusicTemporary() {
-      if (!blutuEgg || !blutuEgg.isOpen) return;
-      if (blutuEgg.directAudio) {
-        try { blutuEgg.directAudio.pause(); } catch (e) {}
-      }
-      if (blutuEgg.ytPlayer && blutuEgg.isYtReady) {
-        try {
-          if (typeof blutuEgg.ytPlayer.pauseVideo === 'function') {
-            blutuEgg.ytPlayer.pauseVideo();
-          }
-        } catch (e) {}
-      }
-    }
 
     function ensureBlutuGameMusicPlaying() {
-      if (!blutuEgg || !blutuEgg.isOpen || blutuEgg.isMuted) return;
-      unlockBlutuWebViewAudioSession();
-
-      if (blutuEgg.usingDirectAudio && blutuEgg.directAudio) {
-        try {
-          blutuEgg.directAudio.muted = false;
-          blutuEgg.directAudio.volume = 0.85;
-          if (blutuEgg.directAudio.paused) {
-            const p = blutuEgg.directAudio.play();
-            if (p && typeof p.catch === 'function') p.catch(() => {});
-          }
-        } catch (e) {}
-        return;
-      }
-
-      if (blutuEgg.ytPlayer && blutuEgg.isYtReady) {
-        try {
-          const isPlayerMuted = typeof blutuEgg.ytPlayer.isMuted === 'function' ? blutuEgg.ytPlayer.isMuted() : true;
-          if (isPlayerMuted && typeof blutuEgg.ytPlayer.unMute === 'function') {
-            blutuEgg.ytPlayer.unMute();
-          }
-          if (typeof blutuEgg.ytPlayer.setVolume === 'function') {
-            blutuEgg.ytPlayer.setVolume(85);
-          }
-          const st = typeof blutuEgg.ytPlayer.getPlayerState === 'function' ? blutuEgg.ytPlayer.getPlayerState() : -1;
-          if (st !== 1 && st !== 3) {
-            blutuEgg.ytPlayer.playVideo();
-          }
-        } catch (e) {}
-      } else if (document.getElementById('yt-player')) {
-        sendYouTubeCommandFallback('unMute');
-        sendYouTubeCommandFallback('setVolume', [85]);
-        sendYouTubeCommandFallback('playVideo');
-      }
+      if (!blutuEgg || !blutuEgg.isOpen) return;
+      notifySharedGameUserGesture();
     }
 
     export function initBlutuDinoEasterEgg() {
@@ -256,16 +44,6 @@
         blutuEgg = {
           isOpen: false,
           isMuted: false,
-          usingDirectAudio: false,
-          directAudio: null,
-          directAudioBlobUrl: null,
-          resolvedDirectAudioUrl: GAME_DIRECT_AUDIO_URL,
-          blobFallbackTried: false,
-          lookupFallbackTried: false,
-          ytFallbackTimer: null,
-          ytPlayer: null,
-          isYtReady: false,
-          isYtScriptLoaded: false,
           stageEl: null,
           canvas: null,
           ctx: null,
@@ -380,14 +158,16 @@
       const controlsEl = document.createElement('div');
       controlsEl.className = 'blutu-dino-controls';
 
+      const currentlyMuted = isSharedGameMusicMuted();
+      blutuEgg.isMuted = currentlyMuted;
       const muteBtn = document.createElement('button');
       muteBtn.type = 'button';
       muteBtn.id = 'blutuDinoMuteBtn';
-      muteBtn.className = 'blutu-dino-btn' + (blutuEgg.isMuted ? ' is-muted' : '');
-      muteBtn.setAttribute('aria-label', blutuEgg.isMuted ? 'Activar música' : 'Silenciar música');
-      muteBtn.setAttribute('aria-pressed', blutuEgg.isMuted ? 'true' : 'false');
-      muteBtn.title = blutuEgg.isMuted ? 'Activar música' : 'Silenciar música';
-      muteBtn.innerHTML = blutuEgg.isMuted
+      muteBtn.className = 'blutu-dino-btn' + (currentlyMuted ? ' is-muted' : '');
+      muteBtn.setAttribute('aria-label', currentlyMuted ? 'Activar música' : 'Silenciar música');
+      muteBtn.setAttribute('aria-pressed', currentlyMuted ? 'true' : 'false');
+      muteBtn.title = currentlyMuted ? 'Activar música' : 'Silenciar música';
+      muteBtn.innerHTML = currentlyMuted
         ? '<i class="fa-solid fa-volume-xmark"></i>'
         : '<i class="fa-solid fa-volume-high"></i>';
 
@@ -558,9 +338,9 @@
         if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT' || tgt.isContentEditable)) {
           return;
         }
-        const blogModal = document.getElementById('blogModal');
-        const lightbox = document.getElementById('lightbox');
-        if ((blogModal && blogModal.style.display === 'flex') || (lightbox && lightbox.classList.contains('active'))) {
+        const blogModal = document.getElementById('blogReadModal');
+        const lightbox = document.getElementById('imageModal');
+        if ((blogModal && blogModal.style.display === 'flex') || (lightbox && lightbox.style.display === 'flex')) {
           return;
         }
         if (ev.code === 'Space' || ev.code === 'ArrowUp' || ev.code === 'KeyW') {
@@ -630,260 +410,16 @@
 
     function startBlutuGameMusic() {
       if (!blutuEgg) return;
-      unlockBlutuWebViewAudioSession();
-
-      blutuEgg.blobFallbackTried = false;
-      blutuEgg.lookupFallbackTried = false;
-      if (blutuEgg.ytFallbackTimer) {
-        clearTimeout(blutuEgg.ytFallbackTimer);
-        blutuEgg.ytFallbackTimer = null;
-      }
-
-      // En el navegador integrado de Instagram / WebViews restringidos: reproducir audio HTML5 nativo directamente en el gesto sincrónico del toque
-      if (isRestrictedInAppWebView()) {
-        activateBlutuDirectAudioFallback();
-        return;
-      }
-
-      // En navegadores estándar: desbloquear instancia <audio> de respaldo con WAV silencioso inline (0 peticiones de red) por si YouTube devuelve error 152 o bloquea autoplay
-      blutuEgg.usingDirectAudio = false;
-      if (!blutuEgg.directAudio) {
-        const backupAudio = window.__blutuPrimedGestureAudio || new Audio();
-        window.__blutuPrimedGestureAudio = null;
-        backupAudio.id = 'blutu-direct-audio';
-        backupAudio.preload = 'none';
-        backupAudio.loop = true;
-        backupAudio.playsInline = true;
-        backupAudio.setAttribute('playsinline', '');
-        backupAudio.setAttribute('webkit-playsinline', '');
-        blutuEgg.directAudio = backupAudio;
-      }
-      try {
-        blutuEgg.directAudio.src = GAME_SILENT_WAV_URI;
-        blutuEgg.directAudio.muted = true;
-        const unlockPromise = blutuEgg.directAudio.play();
-        if (unlockPromise && typeof unlockPromise.then === 'function') {
-          unlockPromise.then(() => {
-            if (blutuEgg && blutuEgg.directAudio && !blutuEgg.usingDirectAudio) {
-              blutuEgg.directAudio.pause();
-            }
-          }).catch(() => {});
-        } else {
-          blutuEgg.directAudio.pause();
-        }
-      } catch (e) {}
-
-      let ytContainer = document.getElementById('yt-player-container');
-      const hostParent = (blutuEgg && blutuEgg.stageEl) ? blutuEgg.stageEl : document.body;
-      if (!ytContainer) {
-        ytContainer = document.createElement('div');
-        ytContainer.id = 'yt-player-container';
-        ytContainer.setAttribute('data-music-url', GAME_YOUTUBE_MUSIC_URL);
-        ytContainer.setAttribute('aria-hidden', 'true');
-        ytContainer.style.cssText = 'position:absolute;left:0;top:0;width:200px;height:200px;overflow:hidden;opacity:0.0001;filter:brightness(0);z-index:0;pointer-events:none;';
-        hostParent.insertBefore(ytContainer, hostParent.firstChild);
-      } else {
-        ytContainer.style.cssText = 'position:absolute;left:0;top:0;width:200px;height:200px;overflow:hidden;opacity:0.0001;filter:brightness(0);z-index:0;pointer-events:none;';
-        if (ytContainer.parentNode !== hostParent) {
-          hostParent.insertBefore(ytContainer, hostParent.firstChild);
-        }
-      }
-
-      let ytSlot = document.getElementById('yt-player');
-      if (blutuEgg.ytPlayer && blutuEgg.isYtReady && ytSlot) {
-        try {
-          if (blutuEgg.isMuted) {
-            blutuEgg.ytPlayer.mute();
-          } else {
-            blutuEgg.ytPlayer.unMute();
-            blutuEgg.ytPlayer.setVolume(85);
-          }
-          blutuEgg.ytPlayer.playVideo();
-        } catch (e) {}
-      } else {
-        if (!ytSlot) {
-          ytSlot = document.createElement('div');
-          ytSlot.id = 'yt-player';
-          ytContainer.appendChild(ytSlot);
-        }
-        if (typeof YT !== 'undefined' && YT.Player) {
-          bindBlutuYouTubePlayer();
-        } else if (!blutuEgg.isYtScriptLoaded) {
-          blutuEgg.isYtScriptLoaded = true;
-          const tag = document.createElement('script');
-          tag.src = 'https://www.youtube.com/iframe_api';
-          tag.async = true;
-          tag.onerror = () => {
-            activateBlutuDirectAudioFallback();
-          };
-          document.head.appendChild(tag);
-        }
-      }
-
-      // Guardián automático: si YouTube no logra reproducir en 2.5s (ej. error 152-18 sin sesión o bloqueo de iframe en móvil), activar audio nativo desbloqueado
-      blutuEgg.ytFallbackTimer = setTimeout(() => {
-        if (!blutuEgg || !blutuEgg.isOpen || blutuEgg.usingDirectAudio) return;
-        let isPlayingOk = false;
-        if (blutuEgg.ytPlayer && blutuEgg.isYtReady && typeof blutuEgg.ytPlayer.getPlayerState === 'function') {
-          try {
-            const st = blutuEgg.ytPlayer.getPlayerState();
-            const isPlayerMuted = typeof blutuEgg.ytPlayer.isMuted === 'function' ? blutuEgg.ytPlayer.isMuted() : false;
-            if (st === 1 && (blutuEgg.isMuted || !isPlayerMuted)) {
-              isPlayingOk = true;
-            }
-          } catch (e) {}
-        }
-        if (!isPlayingOk) {
-          activateBlutuDirectAudioFallback();
-        }
-      }, 2500);
+      startSharedGameMusic(blutuEgg.stageEl || document.body, 'blutuDinoMuteBtn');
     }
-
-    function bindBlutuYouTubePlayer() {
-      if (!blutuEgg || blutuEgg.ytPlayer || blutuEgg.usingDirectAudio) return;
-      if (typeof YT === 'undefined' || !YT.Player || !document.getElementById('yt-player')) return;
-      try {
-        const validOrigin = (window.location && window.location.origin && window.location.origin !== 'null' && /^https?:\/\//i.test(window.location.origin))
-          ? window.location.origin
-          : undefined;
-        const playerVars = {
-          autoplay: 1,
-          playsinline: 1,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          rel: 0,
-          loop: 1,
-          playlist: GAME_YOUTUBE_VIDEO_ID,
-          mute: blutuEgg.isMuted ? 1 : 0,
-          widget_referrer: (window.location && window.location.href) ? window.location.href : 'https://blutu.org/'
-        };
-        if (validOrigin) {
-          playerVars.origin = validOrigin;
-        }
-
-        blutuEgg.ytPlayer = new YT.Player('yt-player', {
-          width: '200',
-          height: '200',
-          videoId: GAME_YOUTUBE_VIDEO_ID,
-          playerVars: playerVars,
-          events: {
-            onReady: (ev) => {
-              if (!blutuEgg || blutuEgg.usingDirectAudio) return;
-              blutuEgg.isYtReady = true;
-              try {
-                const iframeEl = typeof ev.target.getIframe === 'function' ? ev.target.getIframe() : document.getElementById('yt-player');
-                if (iframeEl) {
-                  iframeEl.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-                  iframeEl.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-                  iframeEl.setAttribute('tabindex', '-1');
-                  iframeEl.setAttribute('aria-hidden', 'true');
-                  iframeEl.style.opacity = '0.0001';
-                  iframeEl.style.filter = 'brightness(0)';
-                  iframeEl.style.pointerEvents = 'none';
-                }
-                if (blutuEgg.isMuted) {
-                  ev.target.mute();
-                } else {
-                  ev.target.unMute();
-                  ev.target.setVolume(85);
-                }
-                if (blutuEgg.isOpen) {
-                  ev.target.playVideo();
-                } else {
-                  ev.target.pauseVideo();
-                }
-              } catch (err) {}
-            },
-            onStateChange: (ev) => {
-              if (!blutuEgg || !blutuEgg.isOpen || blutuEgg.usingDirectAudio) return;
-              if (ev.data === 1) {
-                if (!blutuEgg.isMuted) {
-                  try {
-                    if (typeof ev.target.isMuted === 'function' && ev.target.isMuted()) {
-                      ev.target.unMute();
-                      ev.target.setVolume(85);
-                    }
-                  } catch (e) {}
-                }
-                if (blutuEgg.ytFallbackTimer) {
-                  const stillMuted = (!blutuEgg.isMuted && typeof ev.target.isMuted === 'function') ? ev.target.isMuted() : false;
-                  if (!stillMuted) {
-                    clearTimeout(blutuEgg.ytFallbackTimer);
-                    blutuEgg.ytFallbackTimer = null;
-                  }
-                }
-              } else if (typeof YT !== 'undefined' && YT.PlayerState && ev.data === YT.PlayerState.ENDED) {
-                try {
-                  ev.target.seekTo(0);
-                  ev.target.playVideo();
-                } catch (err) {}
-              }
-            },
-            onError: () => {
-              activateBlutuDirectAudioFallback();
-            }
-          }
-        });
-      } catch (e) {
-        activateBlutuDirectAudioFallback();
-      }
-    }
-
-    window.onYouTubeIframeAPIReady = function() {
-      bindBlutuYouTubePlayer();
-    };
 
     function toggleBlutuGameMute() {
       if (!blutuEgg) return;
-      unlockBlutuWebViewAudioSession();
-      blutuEgg.isMuted = !blutuEgg.isMuted;
+      blutuEgg.isMuted = toggleSharedGameMute();
+    }
 
-      if (blutuEgg.muteBtn) {
-        blutuEgg.muteBtn.classList.toggle('is-muted', blutuEgg.isMuted);
-        blutuEgg.muteBtn.setAttribute('aria-label', blutuEgg.isMuted ? 'Activar música' : 'Silenciar música');
-        blutuEgg.muteBtn.setAttribute('aria-pressed', blutuEgg.isMuted ? 'true' : 'false');
-        blutuEgg.muteBtn.title = blutuEgg.isMuted ? 'Activar música' : 'Silenciar música';
-        blutuEgg.muteBtn.innerHTML = blutuEgg.isMuted
-          ? '<i class="fa-solid fa-volume-xmark"></i>'
-          : '<i class="fa-solid fa-volume-high"></i>';
-      }
-
-      if (blutuEgg.usingDirectAudio && blutuEgg.directAudio) {
-        try {
-          blutuEgg.directAudio.muted = blutuEgg.isMuted;
-          if (blutuEgg.isMuted) {
-            blutuEgg.directAudio.pause();
-          } else {
-            blutuEgg.directAudio.volume = 0.85;
-            if (blutuEgg.isOpen) {
-              const p = blutuEgg.directAudio.play();
-              if (p && typeof p.catch === 'function') p.catch(() => {});
-            }
-          }
-        } catch (e) {}
-        return;
-      }
-
-      if (blutuEgg.ytPlayer && blutuEgg.isYtReady) {
-        try {
-          if (blutuEgg.isMuted) {
-            blutuEgg.ytPlayer.mute();
-          } else {
-            blutuEgg.ytPlayer.unMute();
-            blutuEgg.ytPlayer.setVolume(85);
-            if (blutuEgg.isOpen && blutuEgg.ytPlayer.getPlayerState && blutuEgg.ytPlayer.getPlayerState() !== 1) {
-              blutuEgg.ytPlayer.playVideo();
-            }
-          }
-        } catch (e) {}
-      } else {
-        sendYouTubeCommandFallback(blutuEgg.isMuted ? 'mute' : 'unMute');
-        if (!blutuEgg.isMuted && blutuEgg.isOpen) {
-          sendYouTubeCommandFallback('setVolume', [85]);
-          sendYouTubeCommandFallback('playVideo');
-        }
-      }
+    export function pauseBlutuGameMusicTemporary() {
+      pauseSharedGameMusicTemporary();
     }
 
     function stopBlutuLoop() {
@@ -927,35 +463,7 @@
         blutuEgg.intersectionObserver = null;
       }
 
-      if (blutuEgg.ytFallbackTimer) {
-        clearTimeout(blutuEgg.ytFallbackTimer);
-        blutuEgg.ytFallbackTimer = null;
-      }
-      if (blutuEgg.directAudio) {
-        try {
-          blutuEgg.directAudio.pause();
-          blutuEgg.directAudio.removeAttribute('src');
-          blutuEgg.directAudio.load();
-        } catch (e) {}
-        blutuEgg.directAudio = null;
-      }
-      if (blutuEgg.directAudioBlobUrl) {
-        try { URL.revokeObjectURL(blutuEgg.directAudioBlobUrl); } catch (e) {}
-        blutuEgg.directAudioBlobUrl = null;
-      }
-      blutuEgg.usingDirectAudio = false;
-
-      if (blutuEgg.ytPlayer) {
-        try {
-          if (typeof blutuEgg.ytPlayer.destroy === 'function') {
-            blutuEgg.ytPlayer.destroy();
-          }
-        } catch (e) {}
-        blutuEgg.ytPlayer = null;
-        blutuEgg.isYtReady = false;
-      }
-      const ytContainer = document.getElementById('yt-player-container');
-      if (ytContainer) ytContainer.remove();
+      stopAndDestroySharedGameMusic(false);
 
       if (blutuEgg.stageEl) {
         blutuEgg.stageEl.remove();
@@ -1221,7 +729,9 @@
 
     function getBlutuJumpScale() {
       const tier = blutuEgg ? (blutuEgg.difficultyTier || 0) : 0;
-      return 1 + Math.min(0.32, tier * 0.065);
+      const linearPart = Math.min(tier, 6) * 0.064;
+      const highTierPart = Math.max(0, tier - 6) * 0.028;
+      return 1 + Math.min(0.56, linearPart + highTierPart);
     }
 
     function executeBlutuJump() {
@@ -1284,7 +794,7 @@
       } else if (blutuEgg.obstacleCount === 2) {
         type = 'BAT';
       } else {
-        const batChance = Math.min(0.48, 0.37 + tier * 0.03);
+        const batChance = Math.min(0.56, 0.40 + tier * 0.025);
         type = Math.random() < batChance ? 'BAT' : 'TOMBSTONE';
         if (type === blutuEgg.lastObstacleType && blutuEgg.sameTypeStreak >= 2) {
           type = (type === 'TOMBSTONE') ? 'BAT' : 'TOMBSTONE';
@@ -1315,11 +825,12 @@
               { w: 48, h: 36, variant: 2 }
             ];
         const d = defs[variantIdx];
-        const risesFromGround = (tier >= 3 || blutuEgg.distance >= 600);
-        const extraTension = Math.min(0.08, Math.max(0, tier - 3) * 0.02);
-        const riseStartRatio = (isCompact ? 0.84 : 0.78) - extraTension;
+        // A partir de 400 puntos (tier >= 2) las lápidas emergen de la tierra cada vez más ágilmente
+        const risesFromGround = (tier >= 2 || blutuEgg.distance >= 400);
+        const extraTension = Math.min(0.11, Math.max(0, tier - 2) * 0.022);
+        const riseStartRatio = (isCompact ? 0.85 : 0.80) - extraTension;
         const riseSpanPx = isCompact ? 102 : 152;
-        const minSafeRiseEndX = blutuEgg.playerRestX + (isCompact ? 126 : 182);
+        const minSafeRiseEndX = blutuEgg.playerRestX + (isCompact ? 124 : 178);
         const jitter = (Math.random() - 0.5) * (isCompact ? 26 : 46);
         const riseStartX = Math.max(
           minSafeRiseEndX + riseSpanPx,
@@ -1342,21 +853,20 @@
           phase: Math.random() * Math.PI * 2
         });
       } else {
-        // Murciélagos con posiciones variadas y capacidad de bajar en picada a ras del suelo para exigir salto o esquiva
+        // Murciélagos vivos: en TODAS las dificultades se mueven de un lado al otro e incluso pueden retroceder y volver a lanzarse
         const batScale = 0.90 + Math.random() * 0.20;
         const w = Math.round((isCompact ? 38 : 42) * batScale);
         const h = Math.round((isCompact ? 20 : 22) * batScale);
         const safeUpperMaxY = Math.max(16, blutuEgg.groundY - blutuEgg.playerSize - h - (isCompact ? 8 : 10));
         const lowSkimY = blutuEgg.groundY - h - (isCompact ? (4 + Math.random() * 5) : (5 + Math.random() * 7));
 
-        // 4 arquetipos distintos nunca repetidos seguidos: picada baja, vuelo rasante, ascenso a media altura y onda alta
         let batArchetype = 'DIVE_LOW';
         if (blutuEgg.obstacleCount === 2) {
           batArchetype = 'DIVE_LOW';
         } else {
           const candidates = [
-            { id: 'DIVE_LOW', weight: 0.35 },
-            { id: 'LOW_PROWL', weight: 0.23 },
+            { id: 'DIVE_LOW', weight: 0.34 },
+            { id: 'LOW_PROWL', weight: 0.24 },
             { id: 'CLIMB_MID', weight: 0.22 },
             { id: 'HIGH_WAVE', weight: 0.20 }
           ].filter((c) => c.id !== blutuEgg.lastBatArchetype);
@@ -1387,7 +897,6 @@
           entryY = Math.min(blutuEgg.groundY - h - 14, safeUpperMaxY + (isCompact ? 16 : 22));
           baseY = Math.max(15, safeUpperMaxY - (1 + Math.random() * 9));
         } else {
-          // HIGH_WAVE
           const highBand = 11 + Math.random() * Math.max(6, (safeUpperMaxY - 14) * 0.45);
           entryY = highBand;
           baseY = highBand;
@@ -1402,7 +911,7 @@
         );
         const vertEndX = Math.max(minSafeVertEndX, vertStartX - vertSpanPx);
 
-        const descendsFromSky = (tier >= 5 || blutuEgg.distance >= 1000);
+        const descendsFromSky = (tier >= 4 || blutuEgg.distance >= 800) && (Math.random() < Math.min(0.85, 0.45 + tier * 0.08));
         const skySpanPx = isCompact ? 118 : 176;
         const minSafeSkyEndX = blutuEgg.playerRestX + (isCompact ? 136 : 196);
         const skyJitter = (Math.random() - 0.5) * (isCompact ? 24 : 42);
@@ -1412,6 +921,15 @@
         );
         const skyEndX = Math.max(minSafeSkyEndX, skyStartX - skySpanPx);
 
+        // En TODAS las dificultades (desde 0 pts) los murciélagos zigzaguean lateralmente y pueden hacer maniobra de regreso ("turnBack")
+        const tierAgility = Math.min(6, tier);
+        const baseWeaveAmp = (isCompact ? 12.5 : 17.5) + tierAgility * (isCompact ? 2.1 : 3.0);
+        const turnBackProb = Math.min(0.78, 0.46 + tier * 0.06);
+        const canTurnBack = (blutuEgg.obstacleCount === 2) ? true : (Math.random() < turnBackProb);
+        const turnTriggerX = blutuEgg.playerRestX + (isCompact ? (125 + Math.random() * 55) : (175 + Math.random() * 85));
+        const retreatDur = Math.max(0.26, 0.36 - Math.min(0.08, tier * 0.01));
+        const returnChargeDur = Math.max(0.24, 0.34 - Math.min(0.07, tier * 0.01));
+
         blutuEgg.obstacles.push({
           type: 'BAT',
           variant: 0,
@@ -1419,6 +937,8 @@
           canHitGrounded: canHitGrounded,
           x: spawnX,
           anchorX: spawnX,
+          prevScreenX: spawnX,
+          facingRight: false,
           y: descendsFromSky ? (-h - 14) : entryY,
           entryY: entryY,
           baseY: baseY,
@@ -1430,14 +950,20 @@
           skyStartX: skyStartX,
           skyEndX: skyEndX,
           skyEmerge: descendsFromSky ? 0 : 1,
-          lateralMover: descendsFromSky,
+          lateralMover: true,
+          canTurnBack: canTurnBack,
+          turnState: 0, // 0: acercándose, 1: retrocediendo hacia la derecha, 2: volviendo al ataque hacia la izquierda
+          turnElapsed: 0,
+          turnTriggerX: turnTriggerX,
+          retreatDur: retreatDur,
+          returnChargeDur: returnChargeDur,
           phase: Math.random() * Math.PI * 2,
           flapPhase: Math.random() * 8,
-          flapSpeed: (14.4 + Math.random() * 3.8) * (1.06 - (batScale - 0.90) * 0.45),
-          swoopFreq: descendsFromSky ? (3.5 + Math.random() * 1.4) : (3.9 + Math.random() * 2.0),
+          flapSpeed: (14.6 + Math.random() * 3.8 + tierAgility * 0.45) * (1.06 - (batScale - 0.90) * 0.45),
+          swoopFreq: (3.8 + Math.random() * 1.8) + tierAgility * 0.18,
           swoopScale: batArchetype === 'HIGH_WAVE' ? 1.45 : (canHitGrounded ? 0.72 : 1.05),
-          weaveFreq: descendsFromSky ? (2.85 + Math.random() * 0.85) : (2.6 + Math.random() * 1.5),
-          weaveAmp: descendsFromSky ? (isCompact ? 15.5 : 22.0) : (isCompact ? 4.2 : 6.0),
+          weaveFreq: (3.1 + Math.random() * 1.15) + tierAgility * 0.22,
+          weaveAmp: baseWeaveAmp,
           glideCycle: 0.92 + Math.random() * 0.44,
           glideDip: 0,
           isGliding: false,
@@ -1449,11 +975,11 @@
         });
       }
 
-      // Espaciado progresivo pero equilibrado: desde 1000 puntos mantiene aire suficiente para leer el vaivén sin ser injusto
-      const cappedTier = tier <= 5 ? tier : (5 + (tier - 5) * 0.35);
-      const minFloor = tier >= 5 ? 0.56 : 0.50;
-      const minSafeTime = Math.max(minFloor, 0.78 - cappedTier * 0.048);
-      const randomWindow = Math.max(0.24, 0.46 - cappedTier * 0.038);
+      // Cada 200 puntos (cada tier) los obstáculos salen con mayor cadencia y presión, manteniendo siempre ventana justa de salto
+      const progressiveStep = tier <= 6 ? (tier * 0.052) : (6 * 0.052 + (tier - 6) * 0.022);
+      const minFloor = isCompact ? 0.42 : 0.40;
+      const minSafeTime = Math.max(minFloor, 0.78 - progressiveStep);
+      const randomWindow = Math.max(0.16, 0.46 - progressiveStep * 0.82);
       blutuEgg.spawnTimer = minSafeTime + Math.random() * randomWindow;
     }
 
@@ -1708,30 +1234,29 @@
     }
 
     function upgradeFarObstaclesForTier(tier) {
-      if (!blutuEgg || tier < 3) return;
+      if (!blutuEgg || tier < 1) return;
       const isCompact = blutuEgg.width < 520;
       const riseSpanPx = isCompact ? 102 : 152;
-      const minSafeRiseEndX = blutuEgg.playerRestX + (isCompact ? 126 : 182);
+      const minSafeRiseEndX = blutuEgg.playerRestX + (isCompact ? 124 : 178);
       const skySpanPx = isCompact ? 116 : 172;
       const minSafeSkyEndX = blutuEgg.playerRestX + (isCompact ? 138 : 198);
       for (let i = 0; i < blutuEgg.obstacles.length; i++) {
         const obs = blutuEgg.obstacles[i];
-        if (obs.type === 'TOMBSTONE' && !obs.risesFromGround && obs.x > blutuEgg.width * 0.72) {
+        if (tier >= 2 && obs.type === 'TOMBSTONE' && !obs.risesFromGround && obs.x > blutuEgg.width * 0.72) {
           obs.risesFromGround = true;
           obs.riseStartX = Math.max(minSafeRiseEndX + riseSpanPx, Math.min(blutuEgg.width - 24, obs.x - 18));
           obs.riseEndX = Math.max(minSafeRiseEndX, obs.riseStartX - riseSpanPx);
           obs.emerge = 0;
           obs.y = blutuEgg.groundY;
-        } else if (tier >= 5 && obs.type === 'BAT' && !obs.descendsFromSky) {
+        } else if (obs.type === 'BAT') {
           const bAnchor = obs.anchorX !== undefined ? obs.anchorX : obs.x;
-          if (bAnchor > blutuEgg.width * 0.70) {
+          obs.lateralMover = true;
+          obs.weaveAmp = Math.max(obs.weaveAmp || 14, (isCompact ? 12.5 : 17.5) + Math.min(6, tier) * (isCompact ? 2.1 : 3.0));
+          if (tier >= 4 && !obs.descendsFromSky && bAnchor > blutuEgg.width * 0.72) {
             obs.descendsFromSky = true;
-            obs.lateralMover = true;
             obs.skyStartX = Math.max(minSafeSkyEndX + skySpanPx, Math.min(blutuEgg.width - 20, bAnchor - 14));
             obs.skyEndX = Math.max(minSafeSkyEndX, obs.skyStartX - skySpanPx);
             obs.skyEmerge = 0;
-            obs.weaveAmp = isCompact ? 15.5 : 22.0;
-            obs.weaveFreq = 2.85 + Math.random() * 0.85;
             obs.y = -obs.h - 14;
           }
         }
@@ -1892,14 +1417,14 @@
     function updateBlutuPlaying(dt) {
       blutuEgg.runTime += dt;
       const isCompact = blutuEgg.width < 520;
-      const baseSpeed = isCompact ? 226 : 256;
+      const baseSpeed = isCompact ? 228 : 258;
       const tierStep = isCompact ? 34 : 42;
-      const post1000Step = isCompact ? 13 : 16;
-      const maxSpeed = isCompact ? 450 : 535;
-      const intraRamp = (blutuEgg.distance % 200) * 0.05;
-      const tierSpeedBonus = blutuEgg.difficultyTier <= 5
+      const post1200Step = isCompact ? 20 : 25;
+      const maxSpeed = isCompact ? 560 : 665;
+      const intraRamp = (blutuEgg.distance % 200) * 0.065;
+      const tierSpeedBonus = blutuEgg.difficultyTier <= 6
         ? (blutuEgg.difficultyTier * tierStep)
-        : (5 * tierStep + (blutuEgg.difficultyTier - 5) * post1000Step);
+        : (6 * tierStep + (blutuEgg.difficultyTier - 6) * post1200Step);
       blutuEgg.speed = Math.min(maxSpeed, baseSpeed + tierSpeedBonus + intraRamp);
 
       blutuEgg.distance += (blutuEgg.speed * dt) * 0.055;
@@ -2041,9 +1566,51 @@
         const obs = blutuEgg.obstacles[i];
         if (obs.type === 'BAT') {
           if (obs.anchorX === undefined) obs.anchorX = obs.x;
-          obs.anchorX -= blutuEgg.speed * dt;
+          const prevScreenX = (obs.prevScreenX !== undefined) ? obs.prevScreenX : obs.x;
 
-          // Descenso desde el cielo nocturno a partir de los 1000 puntos
+          // Movimiento horizontal vivo en TODAS las dificultades: se mueven de un lado al otro, pueden retroceder hacia la derecha y volver a lanzarse
+          let anchorSpeedMul = 1.0;
+          if (obs.canTurnBack) {
+            if (obs.turnState === 0 && obs.anchorX <= (obs.turnTriggerX || (blutuEgg.playerRestX + 165))) {
+              // Verificar que no choque con un obstáculo justo detrás al retroceder brevemente
+              let safeToRetreat = true;
+              for (let j = 0; j < blutuEgg.obstacles.length; j++) {
+                if (j === i) continue;
+                const other = blutuEgg.obstacles[j];
+                const otherX = other.anchorX !== undefined ? other.anchorX : other.x;
+                if (otherX > obs.anchorX && (otherX - obs.anchorX) < (isCompact ? 120 : 155)) {
+                  safeToRetreat = false;
+                  break;
+                }
+              }
+              obs.turnState = safeToRetreat ? 1 : 2;
+              obs.turnElapsed = 0;
+            }
+            if (obs.turnState === 1) {
+              obs.turnElapsed = (obs.turnElapsed || 0) + dt;
+              const rDur = obs.retreatDur || 0.34;
+              const uRet = Math.min(1, obs.turnElapsed / rDur);
+              // Se devuelve visiblemente hacia la derecha y frena antes de lanzarse de regreso
+              anchorSpeedMul = -0.62 * Math.sin(uRet * Math.PI);
+              if (uRet >= 1) {
+                obs.turnState = 2;
+                obs.turnElapsed = 0;
+              }
+            } else if (obs.turnState === 2) {
+              obs.turnElapsed = (obs.turnElapsed || 0) + dt;
+              const cDur = obs.returnChargeDur || 0.32;
+              const uChg = Math.min(1, obs.turnElapsed / cDur);
+              // Vuelve a embestir hacia la izquierda tras darse la vuelta
+              anchorSpeedMul = 1.0 + (0.48 + Math.min(0.28, blutuEgg.difficultyTier * 0.045)) * Math.sin(uChg * Math.PI);
+              if (uChg >= 1) {
+                obs.turnState = 3;
+              }
+            }
+          }
+
+          obs.anchorX -= (blutuEgg.speed * anchorSpeedMul) * dt;
+
+          // Descenso desde el cielo nocturno en niveles altos
           let skyEmerge = 1;
           if (obs.descendsFromSky) {
             const prevSkyEmerge = (obs.skyEmerge !== undefined) ? obs.skyEmerge : 0;
@@ -2067,10 +1634,10 @@
             vertProg = rawV * rawV * (3 - 2 * rawV);
           }
 
-          // Ecolocalización al iniciar picada baja o aproximarse al jugador
+          // Ecolocalización al iniciar picada, darse la vuelta o aproximarse al jugador
           const alertDist = isCompact ? 205 : 275;
           const distToPlayer = obs.anchorX - blutuEgg.playerX;
-          const diveTrigger = (obs.batArchetype === 'DIVE_LOW' && vertProg > 0.16 && vertProg < 0.85);
+          const diveTrigger = (obs.batArchetype === 'DIVE_LOW' && vertProg > 0.16 && vertProg < 0.85) || obs.turnState === 2;
           if (!obs.chirped && skyEmerge > 0.55 && ((distToPlayer > 22 && distToPlayer < alertDist) || diveTrigger)) {
             obs.chirped = true;
             obs.chirpAge = 0;
@@ -2080,20 +1647,24 @@
             if (obs.chirpAge > 0.46) obs.chirpAge = -1;
           }
 
-          // Vaivén horizontal ("se mueven a los lados" desde 1000 pts) calibrado para que saltar sobre murciélagos bajos sea limpio
-          const wFreq = obs.weaveFreq || 3.0;
-          const baseWeaveAmp = obs.weaveAmp || 4.8;
+          // Vaivén horizontal de lado a lado en todas las dificultades, suavizado justo sobre el jugador para mantener saltos limpios
+          const wFreq = obs.weaveFreq || 3.2;
+          const baseWeaveAmp = obs.weaveAmp || (isCompact ? 13 : 18);
           let swayEnvelope = 1;
           if (obs.lateralMover) {
-            const nearFloor = obs.canHitGrounded ? 0.42 : 0.58;
-            const nearT = Math.max(0, Math.min(1, (distToPlayer - 38) / 100));
-            swayEnvelope = (nearFloor + (1 - nearFloor) * nearT) * Math.min(1, 0.35 + skyEmerge * 0.85);
+            const nearFloor = obs.canHitGrounded ? 0.36 : 0.65;
+            const nearT = Math.max(0, Math.min(1, (distToPlayer - 34) / 96));
+            swayEnvelope = (nearFloor + (1 - nearFloor) * nearT) * Math.min(1, 0.40 + skyEmerge * 0.80);
           }
           const effectiveWeaveAmp = baseWeaveAmp * swayEnvelope;
           const weavePhase = blutuEgg.runTime * wFreq + obs.phase;
           const weaveX = Math.sin(weavePhase) * effectiveWeaveAmp;
           const weaveVx = Math.cos(weavePhase) * wFreq * effectiveWeaveAmp;
           obs.x = obs.anchorX + weaveX;
+
+          const screenDx = obs.x - prevScreenX;
+          obs.prevScreenX = obs.x;
+          obs.facingRight = (obs.turnState === 1) || (screenDx > 0.35);
 
           // Ritmo vivo de ráfagas de aleteo alternadas con planeos en picada
           obs.flightClock = (obs.flightClock || 0) + dt;
@@ -2389,9 +1960,9 @@
             }
             ctx.translate(cxBat, cyBat);
             if (obs.tilt) {
-              ctx.rotate(obs.tilt);
+              ctx.rotate(obs.facingRight ? -obs.tilt : obs.tilt);
             }
-            ctx.scale(stretchX, stretchY);
+            ctx.scale(obs.facingRight ? -stretchX : stretchX, stretchY);
             ctx.drawImage(batCanvas, -drawW * 0.5, -drawH * 0.5, drawW, drawH);
             ctx.restore();
 

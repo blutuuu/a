@@ -301,8 +301,11 @@ export function cloneSiteDefault(val) {
         },
         memorama: {
           pairImages: defaultPairs,
+          pairCrops: Array(10).fill('cover-center'),
           soloBtnColor: '#5a74bf',
           vsPcBtnColor: '#364d8f',
+          vsPcEasyBtnColor: '#4b67b3',
+          vsPcHardBtnColor: '#2b3e78',
           retryBtnColor: '#4a63ab',
           backBtnColor: '#1f2b4d'
         },
@@ -354,8 +357,18 @@ export function cloneSiteDefault(val) {
           }
           base.memorama.pairImages = mergedPairs;
         }
+        if (Array.isArray(raw.memorama.pairCrops)) {
+          const mergedCrops = [];
+          for (let i = 0; i < 10; i++) {
+            const candidateCrop = typeof raw.memorama.pairCrops[i] === 'string' ? raw.memorama.pairCrops[i].trim() : '';
+            mergedCrops.push(candidateCrop || 'cover-center');
+          }
+          base.memorama.pairCrops = mergedCrops;
+        }
         if (typeof raw.memorama.soloBtnColor === 'string' && raw.memorama.soloBtnColor.trim()) base.memorama.soloBtnColor = raw.memorama.soloBtnColor.trim();
         if (typeof raw.memorama.vsPcBtnColor === 'string' && raw.memorama.vsPcBtnColor.trim()) base.memorama.vsPcBtnColor = raw.memorama.vsPcBtnColor.trim();
+        if (typeof raw.memorama.vsPcEasyBtnColor === 'string' && raw.memorama.vsPcEasyBtnColor.trim()) base.memorama.vsPcEasyBtnColor = raw.memorama.vsPcEasyBtnColor.trim();
+        if (typeof raw.memorama.vsPcHardBtnColor === 'string' && raw.memorama.vsPcHardBtnColor.trim()) base.memorama.vsPcHardBtnColor = raw.memorama.vsPcHardBtnColor.trim();
         if (typeof raw.memorama.retryBtnColor === 'string' && raw.memorama.retryBtnColor.trim()) base.memorama.retryBtnColor = raw.memorama.retryBtnColor.trim();
         if (typeof raw.memorama.backBtnColor === 'string' && raw.memorama.backBtnColor.trim()) base.memorama.backBtnColor = raw.memorama.backBtnColor.trim();
       }
