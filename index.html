@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="es" style="--active-gallery-color: #5a74bf; --active-gallery-color2: #28386b; --active-gallery-gradient: linear-gradient(135deg, #5a74bf, #28386b); --active-gallery-btn-text: #ffffff; --active-gallery-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.85);">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="blutu-build-timestamp" content="1793121000000">
+
+  <!-- CONTROL DE CACHÉ ESTRICTO PARA NAVEGADORES INTEGRADOS (INSTAGRAM, FACEBOOK, WEBVIEW) -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+
+  <title>Blutu</title>
+  <meta name="description" content="Sitio web de Blutu con sección de pensamientos, música y galerías">
+  <link rel="canonical" href="https://blutu.org/">
+  <meta property="og:title" content="Blutu">
+  <meta property="og:description" content="Sitio web de Blutu con sección de pensamientos, música y galerías">
+  <meta property="og:url" content="https://blutu.org/">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://blutu.org/blutu_logo.png">
+
+  <!-- ÍCONO EN LA PESTAÑA DEL NAVEGADOR (FAVICON) -->
+  <link rel="icon" type="image/png" href="blutu_logo.png">
+  <link rel="shortcut icon" type="image/png" href="blutu_logo.png">
+
+  <!-- Tipografías y dominios externos -->
+  <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+  <link rel="dns-prefetch" href="https://fonts.gstatic.com">
+  <link rel="dns-prefetch" href="https://yt3.googleusercontent.com">
+  <link rel="dns-prefetch" href="https://upload.wikimedia.org">
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link rel="preconnect" href="https://yt3.googleusercontent.com">
+  <link rel="preconnect" href="https://upload.wikimedia.org">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&amp;family=Cinzel+Decorative:wght@700&amp;family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&amp;family=MedievalSharp&amp;family=UnifrakturMaguntia&amp;display=swap" rel="stylesheet">
+
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- Hojas de estilo modulares de Blutu -->
+  <link rel="stylesheet" href="./styles/core.css">
+  <link rel="stylesheet" href="./styles/blog-comments.css">
+  <link rel="stylesheet" href="./styles/galleries-admin.css">
+  <link rel="stylesheet" href="./styles/merch-games.css" id="blutuMerchGamesStylesheet">
+
+  <!-- Datos estructurados Schema.org -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "MusicGroup",
+    "name": "Blutu",
+    "url": "https://blutu.org/",
+    "image": "https://blutu.org/blutu_logo.png",
+    "description": "Sitio web de Blutu con sección de pensamientos, música y galerías",
+    "sameAs": [
+      "https://www.youtube.com/@Blutuuuu",
+      "https://open.spotify.com/artist/0uzHl1TllXcfSTCCYMwJKk",
+      "https://www.instagram.com/blutuuuuuu",
+      "https://music.apple.com/us/artist/blutu/1223269133"
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <header>
+    <h1>Blutu</h1>
+    <img src="blutu_logo.png" alt="Logo Blutu" class="header-logo" id="logoBtn" title="">
+  </header>
+
+  <!-- CONTROLES FLOTANTES GLOBALES DE MODO EDICIÓN (GUARDAR Y NO GUARDAR CAMBIOS) -->
+  <div id="adminModeBanner" class="admin-floating-controls" style="display: none;">
+    <button type="button" class="admin-icon-btn admin-icon-save" onclick="saveMasterAdminData()" title="Guardar todos los cambios y salir del Modo Edición">
+      <i class="fa-solid fa-floppy-disk"></i>
+      <span>Guardar cambios</span>
+    </button>
+    <button type="button" class="admin-icon-btn admin-icon-exit" onclick="discardMasterAdminData()" title="No guardar cambios y salir del Modo Edición">
+      <i class="fa-solid fa-xmark"></i>
+      <span>No guardar cambios</span>
+    </button>
+  </div>
+
+  <div class="container">
+
+    <!-- LÁPIDA ÚNICA MAESTRA (UNE TODAS LAS SECCIONES) -->
+    <div class="gothic-panel master-tombstone" id="masterTombstone">
+
+      <!-- APARTADO CONCIERTOS -->
+      <section class="tombstone-section is-collapsed" id="liveSection" style="display: none; --anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('liveSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Conciertos <span id="liveSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
+        </div>
+        <div class="collapsible-body" id="liveSectionBody">
+          <div id="inlineLiveAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 15px; margin-top: 5px; padding: 10px 14px;">
+            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; flex-wrap: wrap; gap: 8px;">
+              <span>⚙️ Configuración Conciertos</span>
+              <button type="button" class="admin-btn" onclick="addLiveButtonAdmin()" style="background: var(--accent-blue); color: #fff; border: none; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-weight: bold; font-family: 'Cormorant Garamond', serif; font-size: 0.95rem;">➕ Nuevo Botón</button>
+            </div>
+          </div>
+
+          <p style="font-size: 0.8rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px; display: block; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; padding: 0px; background: transparent; cursor: default; border-radius: 6px; outline: none; font-style: normal;" id="liveSectionDesc" contenteditable="false" title="Haz clic aquí para editar la descripción en tiempo real">Emisiones y transmisiones en directo</p>
+
+          <div id="liveButtonsContainer" class="live-buttons-container"></div>
+
+          <div id="livePaginationControls" class="live-pagination-controls" style="display: none;">
+            <button type="button" id="livePrevBtn" class="live-arrow-btn" onclick="moveLivePage(-1)" title="Grupo anterior" disabled="">←</button>
+            <span id="livePageIndicator" class="live-page-indicator">1 / 1</span>
+            <button type="button" id="liveNextBtn" class="live-arrow-btn" onclick="moveLivePage(1)" title="Siguiente grupo" disabled="">→</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- APARTADO DE MÚSICA -->
+      <section class="tombstone-section is-collapsed" id="musicSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('musicSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Música</h2>
+        </div>
+        <div class="collapsible-body" id="musicSectionBody">
+          <p style="font-size: 0.8rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px;">Escucha en todo lado ☜(ˆ▿ˆc)</p>
+
+          <ul class="streaming-list">
+            <li><a href="https://www.youtube.com/@Blutuuuu" data-web="https://www.youtube.com/@Blutuuuu" data-app="https://www.youtube.com/@Blutuuuu" target="_blank" rel="noopener" class="streaming-link youtube"><span><i class="fa-brands fa-youtube" style="color: #FF0000;"></i> YouTube</span></a></li>
+            <li><a href="spotify://artist/0uzHl1TllXcfSTCCYMwJKk" data-web="https://open.spotify.com/artist/0uzHl1TllXcfSTCCYMwJKk" data-app="spotify://artist/0uzHl1TllXcfSTCCYMwJKk" rel="noopener" class="streaming-link spotify"><span><i class="fa-brands fa-spotify" style="color: #1DB954;"></i> Spotify</span></a></li>
+
+            <li>
+              <a href="https://music.youtube.com/channel/UCPndhocFEFcfPu0-Sudy40A?si=F8GU8EjwCPWbJUqc" data-web="https://music.youtube.com/channel/UCPndhocFEFcfPu0-Sudy40A?si=F8GU8EjwCPWbJUqc" data-app="https://music.youtube.com/channel/UCPndhocFEFcfPu0-Sudy40A?si=F8GU8EjwCPWbJUqc" target="_blank" rel="noopener" class="streaming-link ytmusic">
+                <span>
+                  <span class="svg-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="#FF0033">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.48 0-4.5-2.02-4.5-4.5S9.52 7.5 12 7.5s4.5 2.02 4.5 4.5-2.02 4.5-4.5 4.5z"></path>
+                      <path d="M12 9.5l3.5 2.5-3.5 2.5z"></path>
+                    </svg>
+                  </span> YouTube Music
+                </span>
+              </a>
+            </li>
+
+            <li><a href="https://on.soundcloud.com/ZqebpC6clw3mVLEyFO" data-web="https://on.soundcloud.com/ZqebpC6clw3mVLEyFO" target="_blank" rel="noopener" class="streaming-link soundcloud"><span><i class="fa-brands fa-soundcloud" style="color: #FF5500;"></i> SoundCloud</span></a></li>
+            <li><a href="https://music.amazon.es/artists/B0DDVWK99J/blutu" data-web="https://music.amazon.es/artists/B0DDVWK99J/blutu" data-app="amznmp3://music.amazon.es/artists/B0DDVWK99J/blutu" target="_blank" rel="noopener" class="streaming-link amazon"><span><i class="fa-brands fa-amazon" style="color: #00A8E1;"></i> Amazon Music</span></a></li>
+            <li><a href="https://music.apple.com/us/artist/blutu/1223269133" data-web="https://music.apple.com/us/artist/blutu/1223269133" data-app="music://music.apple.com/us/artist/blutu/1223269133" target="_blank" rel="noopener" class="streaming-link apple"><span><i class="fa-brands fa-apple" style="color: #FA243C;"></i> Apple Music</span></a></li>
+
+            <li>
+              <a href="https://tidal.com/artist/54892748/u" data-web="https://tidal.com/artist/54892748/u" data-app="tidal://artist/54892748" target="_blank" rel="noopener" class="streaming-link tidal">
+                <span>
+                  <span class="svg-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="#00FFFF">
+                      <path d="M12 4.2L7.2 9 12 13.8 16.8 9 12 4.2zm0 9.6L7.2 18.6 12 23.4 16.8 18.6 12 13.8zM2.4 9L7.2 13.8 12 9 7.2 4.2 2.4 9zm19.2 0L16.8 4.2 12 9l4.8 4.8 4.8-4.8z"></path>
+                    </svg>
+                  </span> Tidal
+                </span>
+              </a>
+            </li>
+
+            <li><a href="https://www.deezer.com/es/artist/278804411" data-web="https://www.deezer.com/es/artist/278804411" data-app="deezer://www.deezer.com/artist/278804411" target="_blank" rel="noopener" class="streaming-link deezer"><span><i class="fa-brands fa-deezer" style="color: #A238FF;"></i> Deezer</span></a></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- APARTADO DE REDES Y CONTACTO -->
+      <section class="tombstone-section is-collapsed" id="contactSection">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('contactSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Redes y contacto</h2>
+        </div>
+        <div class="collapsible-body" id="contactSectionBody" style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+          <a href="javascript:void(0)" onclick="copyEmailBtnAction(this)" class="email-btn-single">
+            <span id="emailBtnContent"><i class="fa-solid fa-envelope"></i> bbblutu@gmail.com</span>
+          </a>
+
+          <a href="instagram://user?username=blutuuuuuu" data-web="https://www.instagram.com/blutuuuuuu" data-app="instagram://user?username=blutuuuuuu" rel="noopener" class="ig-btn-single">
+            <span><i class="fa-brands fa-instagram"></i> Instagram</span>
+          </a>
+
+          <a href="https://www.last.fm/es/user/blutuuu" data-web="https://www.last.fm/es/user/blutuuu" target="_blank" rel="noopener noreferrer" class="lastfm-btn-single">
+            <span><i class="fa-brands fa-lastfm"></i> Last fm</span>
+          </a>
+
+          <a href="https://letterboxd.com/blutu/" data-web="https://letterboxd.com/blutu/" target="_blank" rel="noopener noreferrer" class="letterboxd-btn-single">
+            <span><i class="fa-brands fa-letterboxd"></i> Letterboxd</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- SECCIÓN DE MERCH -->
+      <section class="tombstone-section merch-panel is-collapsed" id="merchSection" style="display: block; --anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('merchSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Merch <span id="merchSectionHiddenBadge" class="admin-hidden-badge" style="display: none;">Oculto</span></h2>
+        </div>
+        <div class="collapsible-body" id="merchSectionBody">
+          <div id="inlineMerchAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
+            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
+              <span style="font-size: 0.85rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Edita textos y precios sobre las tarjetas o abre cualquier producto para gestionar sus fotos.</span>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="wysiwyg-tool-btn toggle-merch-section-btn" onclick="toggleMerchSectionGlobalVisibility()" title="Mostrar u ocultar toda la sección de Merch a visitantes" style="font-size: 0.78rem; padding: 4px 10px;">👁️‍🗨️ Visible</button>
+                <button type="button" class="wysiwyg-tool-btn" onclick="openCartConfigModal()" title="Configurar Instagram, WhatsApp y botones del carrito" style="font-size: 0.78rem; padding: 4px 10px;">🛒 Canales</button>
+                <button type="button" class="read-more-btn" onclick="createNewMerchInModal()" title="Crear Nuevo Producto" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
+                  ➕ Nuevo Producto
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p style="font-size: 0.85rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px; display: block;" id="merchSectionDesc">Con las tres B</p>
+
+          <div class="merch-category-tabs" id="merchCategoryTabs" style="display: flex;"></div>
+
+          <div id="merchContainer" class="merch-grid-container"></div>
+
+          <div id="merchPaginationControls" class="merch-pagination-controls" style="display: none;">
+            <button type="button" id="merchPrevBtn" class="merch-arrow-btn" onclick="moveMerchPage(-1)" title="Página anterior" disabled="">←</button>
+            <span id="merchPageIndicator" class="merch-page-indicator">1 / 1</span>
+            <button type="button" id="merchNextBtn" class="merch-arrow-btn" onclick="moveMerchPage(1)" title="Página siguiente" disabled="">→</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN MÁS (DESPLIEGA GALERÍA, PENSAMIENTOS Y MUCHO MÁS) -->
+      <section class="tombstone-section is-collapsed more-trigger-section is-last-visible-section" id="moreSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="revealMoreSections()" title="Haz clic para ver más secciones">
+          <h2 style="margin: 0; text-align: center;">Más</h2>
+        </div>
+      </section>
+
+      <!-- GALERÍAS MÚLTIPLES CON PESTAÑAS -->
+      <section class="tombstone-section gallery-panel is-collapsed more-hidden-section" id="gallerySection" style="--anim-color: #5a74bf;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('gallerySection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">👁️</h2>
+        </div>
+        <div class="collapsible-body" id="gallerySectionBody">
+          <div id="inlineGalleryAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
+            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 0.82rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Color pestaña:</span>
+                <input type="color" id="adminGalleryColor1" class="gallery-color-orb" value="#5A74BF" oninput="syncGalleryColorLive(1, this.value)" title="Color inicial del gradiente de esta galería">
+                <input type="color" id="adminGalleryColor2" class="gallery-color-orb" value="#28386B" oninput="syncGalleryColorLive(2, this.value)" title="Color final del gradiente de esta galería">
+                <button type="button" class="wysiwyg-tool-btn" onclick="moveGalleryOrder(-1)" title="Mover esta galería antes" style="padding: 3px 8px; font-size: 0.76rem;">◀</button>
+                <button type="button" class="wysiwyg-tool-btn" onclick="moveGalleryOrder(1)" title="Mover esta galería después" style="padding: 3px 8px; font-size: 0.76rem;">▶</button>
+                <button type="button" class="wysiwyg-tool-btn" onclick="setAsFirstGallery()" title="Fijar esta galería como la primera" style="padding: 3px 8px; font-size: 0.76rem;">⭐ 1ª</button>
+                <button type="button" id="btnDeleteCurrentGallery" class="wysiwyg-tool-btn is-danger" onclick="deleteCurrentGallery()" title="Eliminar la galería activa" style="padding: 3px 8px; font-size: 0.76rem;">🗑️ Galería</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <input type="file" id="galleryPhotoFileInput" accept="image/*" multiple style="display: none;" onchange="handlePhotoFileUpload(event)">
+                <button type="button" class="wysiwyg-tool-btn" onclick="document.getElementById('galleryPhotoFileInput').click()" title="Subir fotos desde tu dispositivo" style="padding: 5px 11px; font-size: 0.78rem;">📤 Subir Fotos</button>
+                <button type="button" class="read-more-btn" onclick="openGalleryMediaModal('add')" title="Añadir foto o video de YouTube / Shorts por enlace" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
+                  ➕ URL / Video
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="gallery-tabs" id="galleryTabsContainer"></div>
+
+          <div class="carousel-container">
+            <div class="carousel-track-wrapper">
+              <div class="carousel-track" id="carouselTrack" style="transform: translateX(0px);"></div>
+            </div>
+
+            <div class="gallery-nav-controls" id="galleryNavControls">
+              <button type="button" class="carousel-arrow prev" onclick="moveSlide(-1, this)" title="Anterior"><i class="fa-solid fa-chevron-left"></i></button>
+              <div class="carousel-dots" id="carouselDots" style="display: flex; align-items: center; justify-content: center;"></div>
+              <button type="button" class="carousel-arrow next" onclick="moveSlide(1, this)" title="Siguiente"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN DE PENSAMIENTOS (UBICADA ABAJO DE GALERÍAS) -->
+      <section class="tombstone-section is-collapsed more-hidden-section" id="blogSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('blogSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Pensamientos</h2>
+        </div>
+        <div class="collapsible-body" id="blogSectionBody">
+          <div id="inlineBlogAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
+            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; gap: 10px; flex-wrap: wrap;">
+              <span style="font-size: 0.85rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Edita textos directamente sobre las tarjetas o abre cualquier publicación para editarla en vivo.</span>
+              <button type="button" class="read-more-btn" onclick="createNewBlogInModal()" title="Crear Nueva Publicación" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
+                ➕ Nueva Publicación
+              </button>
+            </div>
+          </div>
+
+          <div id="blogSliderWrapper" class="blog-slider-wrapper" style="margin-top: 8px;">
+            <div id="blogSliderTrack" class="blog-slider-track" style="transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateX(0%);"></div>
+          </div>
+
+          <div class="blog-nav-controls">
+            <button id="blogPrevBtn" class="blog-arrow-btn" onclick="moveBlogSlide(-1)" title="Página anterior" disabled="">
+              <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <div id="blogDots" class="blog-dots" style="display: flex;"></div>
+            <span id="blogPageIndicator" class="blog-page-indicator">1 / 1</span>
+            <button id="blogNextBtn" class="blog-arrow-btn" onclick="moveBlogSlide(1)" title="Página siguiente">
+              <i class="fa-solid fa-chevron-right"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN MUCHO MÁS (DESPLIEGA JUEGOS Y MURO DE VISITAS) -->
+      <section class="tombstone-section is-collapsed more-trigger-section more-hidden-section" id="muchMoreSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="revealMuchMoreSections()" title="Haz clic para ver mucho más">
+          <h2 style="margin: 0; text-align: center;">Mucho Más</h2>
+        </div>
+      </section>
+
+      <!-- SECCIÓN DE JUEGOS (CARGA BAJO DEMANDA SOLO AL INTERACTUAR) -->
+      <section class="tombstone-section is-collapsed more-hidden-section" id="gamesSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('gamesSection', this)" title="Haz clic para desplegar u ocultar" style="position: relative;">
+          <h2 style="margin: 0; text-align: center;">Juegos <span id="gamesSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
+          <button type="button" id="headerQuickToggleGamesBtn" class="wysiwyg-tool-btn toggle-games-section-btn" onclick="event.stopPropagation(); toggleGamesSectionVisibility();" title="Mostrar u ocultar la sección de Juegos a los visitantes" style="display: none; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 0.74rem; padding: 4px 9px; z-index: 4;">🙈 Ocultar</button>
+        </div>
+        <div class="collapsible-body" id="gamesSectionBody">
+          <div id="inlineGamesAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 10px; margin-top: 6px; padding: 10px 14px; background: rgba(9, 11, 16, 0.65);">
+            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
+              <span style="font-size: 0.86rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Toca "¿Por qué?", "Memorama" o "6x6" para editar su blog, imágenes de parejas y colores de botones.</span>
+              <button type="button" class="wysiwyg-tool-btn toggle-games-section-btn" onclick="toggleGamesSectionVisibility()" title="Mostrar u ocultar toda la sección de Juegos a visitantes" style="font-size: 0.8rem; padding: 5px 12px;">🙈 Ocultar sección</button>
+            </div>
+          </div>
+
+          <div id="gamesSectionContentWrap">
+            <div class="games-why-wrap">
+              <button type="button" id="gamesWhyLinkBtn" class="games-why-link" onclick="triggerGameBlogOpen('why', this)">¿Por qué?</button>
+            </div>
+            <div id="gamesCardsContainer" class="games-cards-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN DE MURO DE VISITAS EN TIEMPO REAL -->
+      <section class="tombstone-section is-collapsed more-hidden-section" id="commentsSection" style="--anim-color: #8ca2e6;">
+        <div class="collapsible-header" onclick="toggleSectionCollapse('commentsSection', this)" title="Haz clic para desplegar u ocultar">
+          <h2 style="margin: 0; text-align: center;">Muro de visitas <span id="buzonSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
+        </div>
+        <div class="collapsible-body" id="commentsSectionBody">
+          <div class="comments-container">
+            <div id="inlineCommentsAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 15px; margin-top: 5px; padding: 10px 14px;">
+              <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; flex-wrap: wrap; gap: 8px;">
+                <span>⚙️ Configuración del Muro de visitas</span>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; cursor: pointer; color: var(--accent-light);">
+                  <input type="checkbox" id="inlineBuzonVisibleCheckbox" onchange="toggleBuzonVisibility(this.checked)" checked style="cursor: pointer;">
+                  <span>Mostrar sección a los visitantes</span>
+                </label>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin: 6px 0 0 0;">
+                En modo edición puedes ocultar o mostrar mensajes individuales haciendo clic en el botón <strong>"🚫 Ocultar"</strong> de cada tarjeta.
+              </p>
+            </div>
+
+            <div class="comments-form-card">
+              <form id="commentSubmitForm" onsubmit="event.preventDefault(); window.submitVisitorComment &amp;&amp; window.submitVisitorComment();">
+                <div class="comment-input-group">
+                  <input type="text" id="commentAuthorInput" class="comment-input" placeholder="tu nombre" maxlength="40" required autocomplete="name">
+                </div>
+
+                <div class="comment-input-group" style="margin-top: 12px;">
+                  <textarea id="commentTextInput" class="comment-textarea" placeholder="deja un mensaje" rows="3" maxlength="800" required></textarea>
+                  <div class="comment-char-count"><span id="commentCharCount">0</span> / 800</div>
+                </div>
+
+                <div class="comment-form-actions">
+                  <span id="commentFormFeedback" class="comment-feedback"></span>
+                  <button type="submit" id="submitCommentBtn" class="comment-submit-btn">
+                    <span id="submitCommentBtnText">Publicar</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="comments-list-header" style="justify-content: flex-end;">
+              <span id="commentsCountBadge" class="comments-count-badge">0 mensajes</span>
+            </div>
+
+            <div id="commentsFeed" class="comments-feed">
+              <div class="comments-loading">
+                <span class="comments-spinner"></span>
+                <p>Conectando con las sombras...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- Fin masterTombstone -->
+
+  </div><!-- Fin container -->
+
+  <!-- OVERLAY DE PANTALLA OSCURA Y LOGO EN EL CENTRO AL HACER CLIC EN "LEER" -->
+  <div id="readOverlay" class="read-overlay">
+    <div class="read-overlay-content">
+      <img src="blutu_logo.png" alt="Blutu Logo" class="read-overlay-logo">
+    </div>
+  </div>
+
+  <!-- MODAL PARA LEER BLOG COMPLETO -->
+  <div id="blogReadModal" class="modal" onclick="blogModalBgClick(event)" style="display: none;">
+    <div class="blog-modal-box">
+      <span class="close-blog-modal" onclick="closeBlogModal()">×</span>
+      <div id="blogModalBody"></div>
+    </div>
+  </div>
+
+  <!-- MODAL DE FOTOS Y VIDEOS CON NAVEGACIÓN -->
+  <div id="imageModal" class="modal" onclick="modalBgClick(event)" style="display: none;">
+    <span class="close-modal" onclick="closeModal()">×</span>
+    <button class="modal-arrow prev" onclick="navigateModal(-1)"><i class="fa-solid fa-chevron-left"></i></button>
+    <button class="modal-arrow next" onclick="navigateModal(1)"><i class="fa-solid fa-chevron-right"></i></button>
+    <div id="modalMediaContainer" style="display: flex; justify-content: center; align-items: center; max-width: 90vw; max-height: 80vh; position: relative;">
+      <img class="modal-content" id="modalImg" alt="Vista Ampliada" referrerpolicy="no-referrer" style="display: none;">
+      <div id="modalVideoWrapper" style="display: none; width: min(92vw, 820px); max-height: 75vh; border-radius: 16px; overflow: hidden; border: 2px solid var(--accent-blue); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), 0 0 20px var(--modal-aura-color, rgba(90, 116, 191, 0.5)); background: #000; position: relative;">
+        <iframe id="modalVideoIframe" style="width: 100%; height: 100%; min-height: 240px; border: none; display: block;" allow="autoplay; fullscreen; picture-in-picture" referrerpolicy="no-referrer-when-downgrade" allowfullscreen="" src="about:blank"></iframe>
+      </div>
+    </div>
+    <div class="modal-caption" id="modalCaption"></div>
+  </div>
+
+  <!-- MODAL DE ENTRADA A MODO ADMINISTRADOR (SOLO BOTÓN DE GOOGLE) -->
+  <div id="passwordModal" style="display: none; align-items: center; justify-content: center; position: fixed; inset: 0; background: rgba(5, 5, 8, 0.82); backdrop-filter: blur(8px); z-index: 99999;" onclick="if(event.target===this) closePasswordModal()">
+    <div style="background: rgba(13, 15, 20, 0.96); padding: 18px; border: 1px solid var(--accent-light); border-radius: 50%; box-shadow: 0 0 35px rgba(90, 116, 191, 0.55); display: flex; align-items: center; justify-content: center;">
+      <button type="button" id="googleAdminAuthBtn" onclick="handleGoogleSignIn()" style="background: #ffffff; border: none; width: 68px; height: 68px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.6); transition: all 0.25s ease;" onmouseover="this.style.transform='scale(1.1)'; this.style.boxShadow='0 0 30px rgba(255,255,255,0.85)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 20px rgba(0,0,0,0.6)';" title="Continuar con Google">
+        <svg width="34" height="34" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- PANEL ADMINISTRADOR Y MODALES DE EDICIÓN (MONTADOS BAJO DEMANDA) -->
+  <div id="adminModal" class="modal" onclick="if(event.target===this) closeAdminModal()" style="display: none;"></div>
+
+  <!-- MODAL DE DETALLE DE PRODUCTO DE MERCH -->
+  <div id="merchDetailModal" class="modal" onclick="if(event.target.id==='merchDetailModal') closeMerchModal()" style="display: none; z-index: 3000;">
+    <div class="blog-modal-box" style="max-width: 650px;">
+      <span class="close-blog-modal" onclick="closeMerchModal()">×</span>
+      <input type="file" id="merchModalFileInput" accept="image/*" multiple style="display: none;" onchange="handleMerchModalMultiFileUpload(event)">
+      <div id="merchModalBody"></div>
+    </div>
+  </div>
+
+  <!-- BOTÓN FLOTANTE DEL CARRITO DE COMPRAS -->
+  <button type="button" id="floatingCartBtn" class="floating-cart-btn" onclick="openCartModal()" title="Ver Carrito de Compras" style="display: none;">
+    <span class="blutu-cart-icon" style="width: 20px; height: 20px;"></span>
+    <span>Carrito</span>
+    <span id="cartBadgeCount" class="cart-badge-count">0</span>
+  </button>
+
+  <!-- TOAST DE NOTIFICACIÓN DEL CARRITO -->
+  <div id="cartToast" class="cart-toast">
+    <span class="blutu-cart-icon" style="width: 18px; height: 20px;"></span>
+    <span id="cartToastMsg"></span>
+  </div>
+
+  <!-- MODAL DE CARRITO DE COMPRAS -->
+  <div id="cartModal" class="modal" onclick="if(event.target.id==='cartModal') closeCartModal()" style="display: none; z-index: 4000;">
+    <div class="cart-modal-box">
+      <span class="close-blog-modal" onclick="closeCartModal()" style="position: absolute; top: 12px; right: 16px; cursor: pointer; font-size: 1.8rem; color: var(--accent-light); padding: 4px;" title="Cerrar carrito">×</span>
+
+      <div class="cart-modal-header">
+        <h2 class="cart-header-title">
+          <span class="blutu-cart-icon" style="width: 24px; height: 24px;"></span> Carrito de Compras
+        </h2>
+        <p class="cart-header-subtitle">Selección de merch oficial de Blutu</p>
+        <div id="cartModalAdminConfigWrap" style="display: none; margin-top: 8px;">
+          <button type="button" class="wysiwyg-tool-btn" onclick="openCartConfigModal()" style="font-size: 0.78rem; padding: 4px 12px;">⚙️ Configurar Canales y Botones</button>
+        </div>
+      </div>
+
+      <div id="cartItemsContainer" class="cart-items-list">
+        <div style="text-align: center; padding: 40px 10px; color: var(--text-muted);">
+          <div class="blutu-cart-icon" style="width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.6;"></div>
+          <p style="font-size: 1rem; font-family: 'Cinzel Decorative', 'Cinzel', serif; color: var(--white); margin-bottom: 6px;">Tu carrito está vacío</p>
+          <p style="font-size: 0.85rem;">Explora el merch oficial de Blutu y añade tus productos favoritos.</p>
+        </div>
+      </div>
+
+      <div id="cartFooter" class="cart-footer" style="display: none;">
+        <div id="cartSummaryBreakdown" class="cart-summary-breakdown">
+          <div class="cart-total-row">
+            <span>Total a pagar:</span>
+            <span id="cartTotalPrice" class="cart-total-price">$0</span>
+          </div>
+        </div>
+
+        <div class="cart-checkout-options">
+          <button type="button" class="cart-checkout-btn whatsapp" onclick="checkoutViaWhatsApp()">
+            <i class="fa-brands fa-whatsapp" style="font-size: 1.15rem;"></i> Realizar Pedido por WhatsApp
+          </button>
+          <button type="button" class="cart-checkout-btn instagram" onclick="checkoutViaInstagram()">
+            <span class="checkout-btn-title"><i class="fa-brands fa-instagram" style="font-size: 1.15rem;"></i> Pedir por Mensaje Directo (Instagram)</span>
+            <span class="checkout-btn-subnote">📋 Copia tu pedido y te lleva al perfil para que lo pegues en el chat</span>
+          </button>
+          <button type="button" class="cart-checkout-btn copy" onclick="copyOrderDetailsToClipboard()">
+            📋 Copiar Resumen de Pedido
+          </button>
+        </div>
+
+        <button type="button" class="cart-item-del-btn clear-all-btn" onclick="clearCart()">🗑️ Vaciar Carrito</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p><span id="adminTrigger" style="user-select: none;">© Blutu. 20XX</span></p>
+  </footer>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# ----------------------------------------------------------------------
+# Configuración Anti-Caché para Blutu (Instagram, Facebook y WebViews)
+# ----------------------------------------------------------------------
+
+<IfModule mod_headers.c>
+    # Forzar a que el archivo HTML principal NUNCA se quede en la caché de Instagram ni del navegador
+    <FilesMatch "\.(html|htm)$">
+        Header set Cache-Control "max-age=0, no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "Wed, 11 Jan 1984 05:00:00 GMT"
+        Header unset ETag
+    </FilesMatch>
+
+    # Permitir caché eficiente con revalidación rápida para hojas de estilo y módulos JS externos
+    <FilesMatch "\.(css|js|mjs|json)$">
+        Header set Cache-Control "public, max-age=3600, must-revalidate"
+    </FilesMatch>
+</IfModule>

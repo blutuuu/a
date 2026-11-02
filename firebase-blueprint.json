@@ -1,0 +1,201 @@
+{
+  "entities": {
+    "Comment": {
+      "title": "Comment",
+      "description": "Comentario público en tiempo real dejado por los visitantes en el Muro, con soporte para respuesta oficial del administrador",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "description": "Nombre o alias del visitante"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Texto del comentario"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Marca de tiempo de creación del servidor"
+        },
+        "symbol": {
+          "type": "string",
+          "maxLength": 10,
+          "description": "Símbolo o ícono asignado"
+        },
+        "reply": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Respuesta oficial de Blutu"
+        },
+        "replyAuthor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "description": "Autor de la respuesta oficial"
+        },
+        "replyCreatedAt": {
+          "type": "string",
+          "description": "Marca de tiempo de creación de la respuesta"
+        },
+        "replyUpdatedAt": {
+          "type": "string",
+          "description": "Marca de tiempo de última edición de la respuesta"
+        }
+      },
+      "required": ["name", "content", "createdAt"]
+    },
+    "SiteData": {
+      "title": "SiteData",
+      "description": "Datos de configuración y contenido del sitio Blutu sincronizados en tiempo real",
+      "type": "object",
+      "properties": {
+        "posts": {
+          "type": "array",
+          "description": "Lista de artículos y publicaciones de Pensamientos"
+        },
+        "galleries": {
+          "type": "object",
+          "description": "Galerías de fotos y contenido multimedia"
+        },
+        "galleryOrder": {
+          "type": "array",
+          "description": "Orden de las pestañas de galerías"
+        },
+        "live": {
+          "type": "object",
+          "description": "Configuración y botones de la sección Conciertos"
+        },
+        "merch": {
+          "type": "object",
+          "description": "Configuración, catálogo y categorías de la sección Merch"
+        },
+        "buzon": {
+          "type": "object",
+          "description": "Configuración heredada de visibilidad y datos de Juegos (gamesVisible, gamesData) y Muro de visitas"
+        },
+        "muro": {
+          "type": "object",
+          "description": "Configuración de visibilidad y contenido editable de la sección Juegos (gamesVisible, gamesData: ¿Por qué?, Memorama y 6x6, imágenes de parejas y colores de botones), Muro de visitas y comentarios moderados"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Fecha y hora de la última modificación"
+        }
+      },
+      "required": ["updatedAt"]
+    },
+    "BlogPost": {
+      "title": "BlogPost",
+      "description": "Publicación individual respaldada permanentemente en la nube",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "dateIso": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 500000
+        },
+        "imageCaption": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "imageFit": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "imageAura": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 500000
+        },
+        "permanentAnchor": {
+          "type": "boolean"
+        },
+        "isArchived": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "archivedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "title", "updatedAt"]
+    },
+    "BlogBackup": {
+      "title": "BlogBackup",
+      "description": "Respaldo consolidado de publicaciones de Pensamientos",
+      "type": "object",
+      "properties": {
+        "posts": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "lastPostSaved": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["posts", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/comments/{commentId}": {
+      "schema": {
+        "$ref": "#/entities/Comment"
+      },
+      "description": "Colección pública de mensajes del Muro con moderación y respuesta exclusiva de administradores"
+    },
+    "/site_data/{docId}": {
+      "schema": {
+        "$ref": "#/entities/SiteData"
+      },
+      "description": "Documento principal de datos dinámicos del sitio Blutu editable únicamente por administradores"
+    },
+    "/blog_posts/{postId}": {
+      "schema": {
+        "$ref": "#/entities/BlogPost"
+      },
+      "description": "Respaldo individual permanente de publicaciones de Pensamientos editable únicamente por administradores"
+    },
+    "/blog_backups/{backupId}": {
+      "schema": {
+        "$ref": "#/entities/BlogBackup"
+      },
+      "description": "Respaldo consolidado de publicaciones accesible únicamente por administradores"
+    }
+  }
+}

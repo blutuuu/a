@@ -1,0 +1,1928 @@
+/* Blutu — Conciertos, Merch Catalog, Shopping Cart & Mini-Games */
+    /* ESTILOS DEL APARTADO EN VIVO */
+    .live-pulse-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #ff3333;
+      font-size: 0.75rem;
+      font-family: sans-serif;
+      font-weight: bold;
+      text-shadow: 0 0 6px rgba(255, 51, 51, 0.6);
+      animation: liveBadgePulse 1.8s infinite ease-in-out;
+    }
+
+    @keyframes liveBadgePulse {
+      0% { opacity: 0.65; transform: scale(0.96); }
+      50% { opacity: 1; transform: scale(1.06); }
+      100% { opacity: 0.65; transform: scale(0.96); }
+    }
+
+    .live-buttons-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .live-button-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-radius: 8px 8px 0 0;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+      font-family: 'Cinzel Decorative', serif;
+      font-size: 0.88rem;
+      text-decoration: none;
+      transition: transform 0.25s ease, border-color 0.25s ease;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .live-button-item:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 15px rgba(255, 255, 255, 0.4);
+      border-color: rgba(255, 255, 255, 0.7);
+    }
+
+    .live-button-item .live-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background-color: #ff3333;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #ff3333;
+      margin-right: 8px;
+      animation: liveDotPulse 1.5s infinite ease-in-out;
+    }
+
+    @keyframes liveDotPulse {
+      0% { transform: scale(0.82); opacity: 0.6; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.82); opacity: 0.6; }
+    }
+
+    .live-pagination-controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px;
+      margin-top: 15px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border-color);
+    }
+
+    .live-arrow-btn {
+      background: var(--btn-bg);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+
+    .live-arrow-btn:hover:not(:disabled) {
+      background: var(--accent-blue);
+      color: #ffffff;
+      transform: scale(1.12);
+      box-shadow: 0 0 12px rgba(90, 116, 191, 0.6);
+    }
+
+    .live-arrow-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      border-color: var(--border-color);
+    }
+
+    .live-page-indicator {
+      font-family: 'Cinzel Decorative', serif;
+      font-size: 0.85rem;
+      color: var(--accent-light);
+      letter-spacing: 1px;
+    }
+
+    /* ESTILOS DEL GESTOR EN VIVO Y MERCH EN EL PANEL DE ADMINISTRACIÓN (ALTA DENSIDAD) */
+    .admin-live-list, .admin-merch-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    @media (min-width: 650px) {
+      .admin-live-list, .admin-merch-list {
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 10px;
+      }
+    }
+
+    .admin-live-card, .admin-merch-card {
+      background: rgba(13, 14, 18, 0.92);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 0;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+      position: relative;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .admin-live-card:hover, .admin-merch-card:hover {
+      border-color: var(--accent-blue);
+    }
+
+    .admin-live-card.collapsed, .admin-merch-card.collapsed {
+      padding: 8px 12px;
+    }
+
+    .admin-live-card.dragging, .admin-merch-card.dragging {
+      opacity: 0.4;
+      border-style: dashed;
+      transform: scale(0.98);
+    }
+
+    .admin-live-card.drag-over, .admin-merch-card.drag-over {
+      border-color: var(--accent-light);
+      box-shadow: 0 0 18px var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .live-drag-handle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(90, 116, 191, 0.18);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      cursor: grab;
+      user-select: none;
+      border-radius: 4px;
+      font-family: sans-serif;
+    }
+
+    .live-drag-handle:active {
+      cursor: grabbing;
+      background: var(--accent-blue);
+      color: #fff;
+    }
+
+    .btn-live-move {
+      background: rgba(90, 116, 191, 0.15);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      padding: 3px 7px;
+      font-size: 0.78rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-live-move:hover:not(:disabled) {
+      background: var(--accent-blue);
+      color: #fff;
+    }
+
+    .btn-live-move:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .admin-live-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .admin-live-card:not(.collapsed) .admin-live-header,
+    .admin-merch-card:not(.collapsed) .admin-live-header {
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+      border-bottom: 1px dashed var(--border-color);
+    }
+
+    .admin-card-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .admin-card-mini-thumb {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      object-fit: cover;
+      background: #050508;
+      border: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    .admin-card-title-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .admin-card-title {
+      font-family: 'Cinzel', serif;
+      font-size: 0.88rem;
+      font-weight: bold;
+      color: var(--accent-light);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .admin-card-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .admin-live-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .btn-card-expand {
+      background: rgba(90, 116, 191, 0.18);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-weight: bold;
+    }
+
+    .btn-card-expand:hover {
+      background: var(--accent-blue);
+      color: #fff;
+    }
+
+    .admin-card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .admin-card-body .admin-form-group {
+      margin-bottom: 0 !important;
+      margin-top: 0 !important;
+    }
+
+    .admin-card-body label {
+      font-size: 0.76rem !important;
+      margin-bottom: 2px !important;
+      color: var(--text-muted) !important;
+      display: block;
+    }
+
+    .admin-card-body input[type="text"],
+    .admin-card-body select,
+    .admin-card-body textarea {
+      padding: 5px 8px !important;
+      font-size: 0.85rem !important;
+      background: #050508 !important;
+      border: 1px solid var(--border-color) !important;
+      color: var(--white) !important;
+      border-radius: 4px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+
+    .admin-card-body input[type="text"]:focus,
+    .admin-card-body select:focus,
+    .admin-card-body textarea:focus {
+      border-color: var(--accent-blue) !important;
+    }
+
+    .admin-form-row {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+    }
+
+    @media (max-width: 500px) {
+      .admin-form-row {
+        flex-direction: column;
+        gap: 6px;
+      }
+    }
+
+    .flex-1 { flex: 1; min-width: 0; }
+    .flex-2 { flex: 2; min-width: 0; }
+    .flex-3 { flex: 3; min-width: 0; }
+
+    .btn-live-toggle {
+      background: rgba(90, 116, 191, 0.2);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-live-toggle.off {
+      background: rgba(180, 50, 50, 0.2);
+      color: #ff8080;
+      border-color: #b33636;
+    }
+
+    .btn-live-delete {
+      background: rgba(180, 50, 50, 0.2);
+      color: #ff8080;
+      border: 1px solid #b33636;
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-live-delete:hover {
+      background: #b33636;
+      color: #fff;
+    }
+
+    .admin-live-grid, .admin-merch-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    @media (max-width: 600px) {
+      .admin-live-grid, .admin-merch-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .color-gradient-picker-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .color-gradient-picker-row .color-box {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+    }
+
+    .live-preview-sample {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px 8px 0 0;
+      color: #ffffff;
+      font-family: 'Cinzel Decorative', serif;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    /* ESTILOS DE LA SECCIÓN DE MERCH */
+    .merch-panel {
+      grid-column: 1 / -1;
+      margin-top: 10px;
+      border-color: var(--accent-blue);
+      position: relative;
+    }
+
+    .merch-grid-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      width: 100%;
+      margin-bottom: 15px;
+    }
+
+    @media (max-width: 850px) {
+      .merch-grid-container {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+      }
+    }
+
+    @media (max-width: 550px) {
+      .merch-grid-container {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+    }
+
+    .merch-card {
+      background: linear-gradient(180deg, #151b29 0%, #0b0e16 100%);
+      border: 1.5px solid rgba(90, 116, 191, 0.46);
+      border-radius: 28px 28px 10px 10px;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 380px;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease, box-shadow 0.25s ease;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.62);
+    }
+
+    .merch-card:hover {
+      border-color: var(--accent-light);
+      transform: translateY(-3px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 28px rgba(90, 116, 191, 0.36);
+    }
+
+    .merch-img-wrapper {
+      position: relative;
+      width: 100%;
+      flex: 1.22 0 54%;
+      min-height: 214px;
+      aspect-ratio: 4 / 3.25;
+      border-radius: 0;
+      overflow: hidden;
+      margin: 0;
+      background: #070910;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .merch-img-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+      -webkit-mask-image: linear-gradient(to bottom, #000000 0%, #000000 66%, rgba(0, 0, 0, 0.78) 82%, rgba(0, 0, 0, 0.28) 93%, transparent 100%);
+      mask-image: linear-gradient(to bottom, #000000 0%, #000000 66%, rgba(0, 0, 0, 0.78) 82%, rgba(0, 0, 0, 0.28) 93%, transparent 100%);
+      transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+    }
+
+    .merch-card:hover .merch-img-wrapper img {
+      transform: scale(1.05);
+    }
+
+    .merch-card-body {
+      position: relative;
+      z-index: 2;
+      flex: 0.88 1 46%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 4px 16px 16px 16px;
+      gap: 4px;
+    }
+
+    .merch-card-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .merch-badge-container {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .merch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(13, 14, 18, 0.92);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      padding: 4px 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      white-space: nowrap;
+    }
+
+    .merch-badge.agotado {
+      background: rgba(190, 20, 20, 0.95) !important;
+      color: #ffffff !important;
+      border-color: #ff4d4d !important;
+      box-shadow: 0 0 12px rgba(255, 77, 77, 0.6) !important;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      letter-spacing: 1px;
+    }
+
+    .merch-badge.discount {
+      background: linear-gradient(135deg, #e1306c, #ff4757);
+      border-color: #ff6b81;
+      color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+
+    .merch-card.agotado-card .merch-img-wrapper img {
+      filter: grayscale(35%) contrast(92%);
+      opacity: 0.78;
+    }
+
+    .merch-add-cart-btn.disabled,
+    .merch-add-cart-btn:disabled {
+      background: rgba(45, 15, 15, 0.75) !important;
+      border: 1px solid rgba(255, 77, 77, 0.45) !important;
+      color: #ff9999 !important;
+      cursor: not-allowed !important;
+      opacity: 0.88 !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+
+    .merch-title {
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 1.08rem;
+      color: var(--white);
+      margin-bottom: 4px;
+      line-height: 1.26;
+      text-shadow: 0 2px 10px rgba(6, 8, 14, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9);
+      transition: color 0.2s ease;
+    }
+
+    .merch-card:hover .merch-title {
+      color: var(--accent-light);
+    }
+
+    .merch-price {
+      font-size: 1.04rem;
+      font-weight: bold;
+      color: var(--accent-light);
+      margin-bottom: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .merch-desc {
+      font-size: 0.86rem;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      line-height: 1.36;
+      flex-grow: 1;
+    }
+
+    .merch-desc:not([contenteditable="true"]) {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .merch-buy-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 10px 14px;
+      background: rgba(90, 116, 191, 0.15);
+      color: var(--white);
+      border: 1px solid var(--accent-blue);
+      border-radius: 12px 12px 0 0;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.82rem;
+      font-weight: bold;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    .merch-buy-btn:hover {
+      background: var(--accent-blue);
+      color: #ffffff;
+      box-shadow: 0 0 14px rgba(90, 116, 191, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .merch-pagination-controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px;
+      margin-top: 15px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border-color);
+    }
+
+    .merch-arrow-btn {
+      background: var(--panel-bg);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+
+    .merch-arrow-btn:hover:not(:disabled) {
+      background: var(--accent-blue);
+      color: #ffffff;
+      transform: scale(1.12);
+      box-shadow: 0 0 12px rgba(90, 116, 191, 0.6);
+    }
+
+    .merch-arrow-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      border-color: var(--border-color);
+    }
+
+    .merch-page-indicator {
+      font-family: 'Cinzel Decorative', serif;
+      font-size: 0.88rem;
+      color: var(--accent-light);
+      letter-spacing: 1px;
+    }
+
+    /* ESTILOS DEL GESTOR DE MERCH EN EL PANEL ADMIN */
+    .admin-merch-card {
+      background: rgba(13, 14, 18, 0.85);
+      border: 1px solid var(--accent-blue);
+      border-radius: 12px 12px 0 0;
+      padding: 16px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+      position: relative;
+    }
+
+    .admin-merch-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 600px) {
+      .admin-merch-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ESTILOS DE CATEGORÍAS DE MERCH Y CARRITO DE COMPRAS */
+    .merch-category-tabs {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .merch-category-btn {
+      background: rgba(13, 14, 18, 0.85);
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+      padding: 6px 14px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.82rem;
+      border-radius: 12px 12px 0 0;
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+
+    .merch-category-btn:hover {
+      border-color: var(--accent-blue);
+      color: var(--accent-light);
+    }
+
+    .merch-category-btn.active {
+      background: var(--accent-blue);
+      color: #ffffff;
+      border-color: var(--accent-light);
+      box-shadow: 0 0 12px rgba(90, 116, 191, 0.5);
+    }
+
+    .merch-category-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      color: var(--accent-light);
+      background: rgba(90, 116, 191, 0.15);
+      border: 1px solid rgba(90, 116, 191, 0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      font-family: sans-serif;
+    }
+
+    .merch-actions-row {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
+    }
+
+    .merch-add-cart-btn, .merch-buy-now-btn {
+      flex: 1;
+      padding: 9px 8px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.78rem;
+      font-weight: bold;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.25s ease;
+      box-sizing: border-box;
+    }
+
+    .blutu-cart-icon {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      background-color: var(--accent-light);
+      -webkit-mask: url('blutu_logo.png') no-repeat center / contain;
+      mask: url('blutu_logo.png') no-repeat center / contain;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    .merch-add-cart-btn {
+      width: 100%;
+      padding: 10px 14px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.82rem;
+      font-weight: bold;
+      border-radius: 12px 12px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(90, 116, 191, 0.18);
+      color: var(--white);
+      border: 1px solid var(--accent-blue);
+      transition: all 0.25s ease;
+      box-sizing: border-box;
+    }
+
+    .merch-add-cart-btn:hover {
+      background: var(--accent-blue);
+      color: #fff;
+      box-shadow: 0 0 12px rgba(90, 116, 191, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .merch-add-cart-btn:hover .blutu-cart-icon {
+      background-color: #ffffff;
+    }
+
+    .merch-img-dots {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 5px;
+      z-index: 2;
+      background: rgba(0, 0, 0, 0.55);
+      padding: 4px 8px;
+      border-radius: 10px;
+      backdrop-filter: blur(4px);
+    }
+
+    .merch-img-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.4);
+      transition: all 0.3s ease;
+    }
+
+    .merch-img-dot.active {
+      background: var(--accent-light);
+      width: 12px;
+      border-radius: 3px;
+    }
+
+    .merch-buy-now-btn {
+      display: none;
+    }
+
+    /* BOTÓN FLOTANTE DEL CARRITO */
+    .floating-cart-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 999;
+      background: rgba(10, 12, 18, 0.92);
+      border: 1px solid var(--accent-blue);
+      color: var(--white);
+      padding: 12px 18px;
+      border-radius: 30px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.88rem;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7), 0 0 15px rgba(90, 116, 191, 0.3);
+      backdrop-filter: blur(8px);
+      transition: all 0.3s ease;
+    }
+
+    .floating-cart-btn:hover {
+      transform: scale(1.05) translateY(-3px);
+      border-color: var(--accent-light);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(90, 116, 191, 0.6);
+    }
+
+    .cart-badge-count {
+      background: var(--accent-blue);
+      color: #ffffff;
+      font-size: 0.78rem;
+      font-weight: bold;
+      padding: 2px 7px;
+      border-radius: 12px;
+      border: 1px solid #ffffff;
+      min-width: 18px;
+      text-align: center;
+      transition: transform 0.2s ease;
+    }
+
+    .cart-badge-count.bump {
+      animation: badgeBump 0.3s ease;
+    }
+
+    @keyframes badgeBump {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.4); }
+      100% { transform: scale(1); }
+    }
+
+    /* MODAL DE CARRITO DE COMPRAS */
+    .cart-modal-box {
+      width: 92%;
+      max-width: 520px;
+      max-height: 88vh;
+      background: #0d0f14;
+      border: 1px solid var(--accent-blue);
+      border-radius: 20px;
+      padding: 20px;
+      position: relative;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.9), 0 0 25px rgba(90, 116, 191, 0.4);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: modalFadeIn 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    .cart-modal-header {
+      text-align: center;
+      border-bottom: 1px dashed var(--accent-blue);
+      padding-bottom: 12px;
+      margin-bottom: 10px;
+      position: relative;
+    }
+
+    .cart-header-title {
+      font-size: 1.4rem;
+      color: var(--white);
+      margin: 0;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .cart-header-subtitle {
+      font-size: 0.82rem;
+      color: var(--accent-light);
+      margin-top: 4px;
+      margin-bottom: 0;
+    }
+
+    .cart-items-list {
+      flex: 1;
+      overflow-y: auto;
+      margin: 10px 0;
+      padding-right: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 340px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .cart-item-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(18, 20, 26, 0.92);
+      border: 1px solid rgba(90, 116, 191, 0.35);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .cart-item-img {
+      width: 52px;
+      height: 52px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #050508;
+      border: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    .cart-item-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .cart-item-title {
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.88rem;
+      color: var(--white);
+      margin-bottom: 3px;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .cart-item-price {
+      font-size: 0.82rem;
+      color: var(--accent-light);
+      font-weight: 600;
+    }
+
+    .cart-item-qty-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: #050508;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 2px 4px;
+      flex-shrink: 0;
+    }
+
+    .cart-qty-btn {
+      background: rgba(90, 116, 191, 0.18);
+      border: 1px solid rgba(90, 116, 191, 0.4);
+      color: var(--accent-light);
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      padding: 0;
+    }
+
+    .cart-qty-btn:active, .cart-qty-btn:hover {
+      background: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    .cart-qty-num {
+      font-size: 0.88rem;
+      font-weight: bold;
+      color: var(--white);
+      min-width: 20px;
+      text-align: center;
+    }
+
+    .cart-item-del-btn {
+      background: rgba(180, 50, 50, 0.2);
+      color: #ff8080;
+      border: 1px solid #b33636;
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+      padding: 0;
+    }
+
+    .cart-item-del-btn:hover, .cart-item-del-btn:active {
+      background: #b33636;
+      color: #ffffff;
+      transform: scale(1.05);
+    }
+
+    .cart-footer {
+      border-top: 1px dashed var(--accent-blue);
+      padding-top: 12px;
+      margin-top: auto;
+    }
+
+    .cart-summary-breakdown {
+      background: rgba(5, 5, 8, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+
+    .cart-summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .cart-total-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 1.05rem;
+      color: var(--white);
+      margin-top: 4px;
+    }
+
+    .cart-total-price {
+      color: var(--accent-light);
+      font-weight: bold;
+      font-size: 1.2rem;
+    }
+
+    .cart-checkout-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .cart-checkout-btn {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.85rem;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      text-decoration: none;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .cart-checkout-btn:active {
+      transform: scale(0.98);
+    }
+
+    .cart-checkout-btn.whatsapp {
+      background: linear-gradient(135deg, #25d366, #128c7e);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+    }
+
+    .cart-checkout-btn.whatsapp:hover {
+      box-shadow: 0 6px 18px rgba(37, 211, 102, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .cart-checkout-btn.instagram {
+      background: linear-gradient(135deg, #e1306c, #833ab4);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 4px 12px rgba(225, 48, 108, 0.3);
+      flex-direction: column;
+      gap: 3px;
+      padding: 10px 14px;
+    }
+
+    .cart-checkout-btn .checkout-btn-title {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      font-weight: bold;
+      width: 100%;
+    }
+
+    .cart-checkout-btn .checkout-btn-subnote {
+      display: block;
+      font-size: 0.76rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 500;
+      opacity: 0.95;
+      letter-spacing: 0.2px;
+      line-height: 1.25;
+      color: #fff;
+    }
+
+    .cart-checkout-btn.instagram:hover {
+      box-shadow: 0 6px 18px rgba(225, 48, 108, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .cart-checkout-btn.copy {
+      background: rgba(90, 116, 191, 0.2);
+      color: var(--accent-light);
+      border: 1px solid var(--accent-blue);
+    }
+
+    .cart-checkout-btn.copy:hover {
+      background: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    .clear-all-btn {
+      width: 100% !important;
+      height: auto !important;
+      padding: 8px 12px !important;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif !important;
+      font-size: 0.82rem !important;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 650px) {
+      .cart-modal-box {
+        width: 96vw;
+        max-width: 100%;
+        max-height: 92vh;
+        padding: 14px 10px;
+        border-radius: 16px;
+      }
+
+      .cart-header-title {
+        font-size: 1.15rem;
+      }
+
+      .cart-header-subtitle {
+        font-size: 0.78rem;
+      }
+
+      .cart-items-list {
+        max-height: 280px;
+        gap: 8px;
+        margin: 8px 0;
+      }
+
+      .cart-item-row {
+        gap: 8px;
+        padding: 8px 10px;
+      }
+
+      .cart-item-img {
+        width: 48px;
+        height: 48px;
+      }
+
+      .cart-item-title {
+        font-size: 0.82rem;
+      }
+
+      .cart-item-price {
+        font-size: 0.78rem;
+      }
+
+      .cart-qty-btn {
+        width: 26px;
+        height: 26px;
+        font-size: 0.92rem;
+      }
+
+      .cart-qty-num {
+        min-width: 16px;
+        font-size: 0.82rem;
+      }
+
+      .cart-item-del-btn {
+        width: 28px;
+        height: 28px;
+        font-size: 0.78rem;
+      }
+
+      .cart-summary-breakdown {
+        padding: 8px 10px;
+        margin-bottom: 8px;
+      }
+
+      .cart-summary-row {
+        font-size: 0.8rem;
+      }
+
+      .cart-total-row {
+        font-size: 0.95rem;
+      }
+
+      .cart-total-price {
+        font-size: 1.1rem;
+      }
+
+      .cart-checkout-btn {
+        padding: 11px 12px;
+        font-size: 0.82rem;
+      }
+    }
+
+    .cart-toast {
+      position: fixed;
+      bottom: 85px;
+      right: 24px;
+      z-index: 1000;
+      background: rgba(13, 15, 20, 0.95);
+      border: 1px solid var(--accent-blue);
+      color: var(--white);
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: 0.85rem;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.8), 0 0 15px rgba(90, 116, 191, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transform: translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .cart-toast.show {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    @media (max-width: 768px) {
+      .inline-admin-panel, .admin-box {
+        padding: 12px 10px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      .inline-admin-panel *, .admin-box * {
+        box-sizing: border-box !important;
+      }
+      .admin-form-group {
+        margin-bottom: 12px !important;
+      }
+      .admin-form-group input, 
+      .admin-form-group textarea, 
+      .admin-form-group select,
+      .inline-admin-panel input,
+      .inline-admin-panel textarea,
+      .admin-cat-row input,
+      .admin-merch-grid input {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+      }
+      .admin-cat-row, .admin-add-photo-row {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+      }
+      .admin-cat-row span,
+      .admin-cat-row button {
+        flex-shrink: 0;
+      }
+      .inline-admin-panel [style*="min-width"],
+      .admin-box [style*="min-width"] {
+        min-width: 0 !important;
+      }
+      .inline-admin-panel [style*="flex: 1"],
+      .admin-box [style*="flex: 1"] {
+        flex: 1 1 auto !important;
+      }
+      .admin-form-group div[style*="flex: 1"] {
+        min-width: 100% !important;
+      }
+      #adminCategoriesListContainer .admin-cat-row input {
+        min-width: 80px !important;
+        flex: 1 1 auto !important;
+      }
+      #inlineMerchAdmin .admin-form-group div[style*="display: flex; flex-direction: column; gap: 6px;"] > div {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+      }
+      #inlineMerchAdmin .admin-form-group div[style*="display: flex; flex-direction: column; gap: 6px;"] > div > input {
+        width: 100% !important;
+        margin-top: 4px;
+      }
+    }
+
+    /* SECCIÓN JUEGOS: TEXTO OPRIMIBLE "¿POR QUÉ?", CASILLAS MEMORAMA / 6X6 Y MOTORES CARGADOS BAJO DEMANDA */
+    .games-why-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 8px 0 14px 0;
+    }
+
+    .games-why-link {
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      padding: 10px 14px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: 'Cinzel', serif;
+      font-size: 1.04rem;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      color: var(--accent-light);
+      text-decoration: underline;
+      text-decoration-thickness: 1.5px;
+      text-underline-offset: 6px;
+      text-decoration-color: rgba(140, 162, 230, 0.78);
+      text-shadow: 0 0 12px rgba(90, 116, 191, 0.55);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition: color 0.22s ease, text-shadow 0.22s ease, text-decoration-color 0.22s ease, transform 0.18s ease;
+    }
+
+    .games-why-link:hover,
+    .games-why-link:focus-visible {
+      color: var(--white);
+      text-decoration-color: var(--white);
+      text-shadow: 0 0 16px rgba(140, 162, 230, 0.92), 0 0 28px rgba(90, 116, 191, 0.6);
+      transform: translateY(-1px);
+      outline: none;
+    }
+
+    .games-why-link:active {
+      transform: scale(0.97);
+    }
+
+    .games-cards-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .game-blog-actions-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      margin-top: 30px;
+      width: 100%;
+    }
+
+    .game-blog-modes-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+
+    .game-custom-btn {
+      --game-btn-bg: #5a74bf;
+      --game-btn-text: #ffffff;
+      --game-btn-border: #8ca2e6;
+      --game-btn-glow: rgba(90, 116, 191, 0.45);
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--game-btn-bg);
+      color: var(--game-btn-text);
+      border: 1px solid var(--game-btn-border);
+      font-family: 'Cinzel', serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 11px 24px;
+      min-height: 44px;
+      min-width: 128px;
+      border-radius: 18px 18px 6px 6px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.72), 0 0 14px var(--game-btn-glow);
+      transition: transform 0.18s ease, filter 0.2s ease, box-shadow 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+    }
+
+    .game-custom-btn:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.12);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.84), 0 0 20px var(--game-btn-glow);
+    }
+
+    .game-custom-btn:active {
+      transform: scale(0.97);
+    }
+
+    .game-custom-btn.is-volver-btn {
+      min-width: 140px;
+    }
+
+    /* PANEL DE CONFIGURACIÓN DE JUEGOS DENTRO DEL EDITOR DEL BLOG */
+    .game-admin-config-panel {
+      margin-top: 26px;
+      padding: 16px 14px;
+      background: rgba(6, 8, 13, 0.88);
+      border: 1px dashed var(--blog-border-subtle, var(--accent-blue));
+      border-radius: 18px 18px 8px 8px;
+      box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+    }
+
+    .game-admin-config-title {
+      font-family: 'Cinzel', serif;
+      font-size: 0.92rem;
+      color: var(--blog-title-color, var(--accent-light));
+      text-align: center;
+      margin: 0 0 12px 0;
+      letter-spacing: 0.8px;
+    }
+
+    .game-admin-colors-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .game-admin-color-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: rgba(15, 19, 30, 0.85);
+      border: 1px solid rgba(90, 116, 191, 0.38);
+      border-radius: 8px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.76rem;
+      color: var(--text-main);
+    }
+
+    .game-admin-color-item input[type="color"] {
+      width: 30px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 5px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .memorama-pairs-editor-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 520px) {
+      .memorama-pairs-editor-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .memorama-pair-slot-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      background: rgba(12, 15, 23, 0.9);
+      border: 1px solid rgba(90, 116, 191, 0.35);
+      border-radius: 10px;
+    }
+
+    .memorama-pair-slot-thumb {
+      width: 52px;
+      height: 52px;
+      min-width: 52px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #05060a;
+      border: 1px solid rgba(140, 162, 230, 0.45);
+    }
+
+    .memorama-pair-slot-controls {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .memorama-pair-slot-controls input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      background: #05060a;
+      border: 1px solid rgba(90, 116, 191, 0.45);
+      color: var(--white);
+      border-radius: 5px;
+      padding: 5px 7px;
+      font-size: 0.78rem;
+      font-family: 'Cormorant Garamond', serif;
+    }
+
+    .memorama-pair-slot-btn-row {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .memorama-pair-mini-btn {
+      background: rgba(90, 116, 191, 0.2);
+      border: 1px solid rgba(90, 116, 191, 0.48);
+      color: var(--accent-light);
+      font-family: 'Cinzel', serif;
+      font-size: 0.68rem;
+      padding: 3px 7px;
+      border-radius: 4px;
+      cursor: pointer;
+      line-height: 1.2;
+    }
+
+    .memorama-pair-mini-btn:hover {
+      background: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    /* CONTENEDOR DE JUEGO EN VIVO DENTRO DEL MODAL (OPTIMIZADO PARA CELULAR SIN SCROLL INNECESARIO) */
+    #blogReadModal .blog-modal-box.is-minigame-active {
+      padding: 18px 14px 16px 14px;
+      max-width: 500px;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (max-width: 550px) {
+      #blogReadModal .blog-modal-box.is-minigame-active {
+        width: 95vw;
+        max-height: 92dvh;
+        padding: 14px 10px 14px 10px;
+      }
+    }
+
+    .blutu-minigame-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      gap: 10px;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .minigame-hud-bar {
+      width: 100%;
+      max-width: 368px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 12px;
+      padding-right: 38px;
+      background: rgba(6, 8, 14, 0.88);
+      border: 1px solid var(--blog-border-subtle, rgba(90, 116, 191, 0.45));
+      border-radius: 14px 14px 6px 6px;
+      box-sizing: border-box;
+      font-family: 'Cinzel', serif;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .minigame-hud-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      line-height: 1.15;
+    }
+
+    .minigame-hud-stat.is-center {
+      align-items: center;
+      text-align: center;
+    }
+
+    .minigame-hud-stat.is-right {
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .minigame-hud-label {
+      font-size: 0.64rem;
+      letter-spacing: 0.9px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .minigame-hud-value {
+      font-size: 1.02rem;
+      font-weight: 700;
+      color: var(--white);
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 10px var(--blog-glow-soft, rgba(90, 116, 191, 0.4));
+    }
+
+    .minigame-hud-value.is-active-turn {
+      color: var(--blog-title-color, var(--accent-light));
+      text-shadow: 0 0 12px var(--blog-glow, rgba(140, 162, 230, 0.75));
+    }
+
+    .minigame-hud-value.is-danger-time {
+      color: #ff7a7a;
+      text-shadow: 0 0 12px rgba(255, 90, 90, 0.7);
+    }
+
+    .minigame-turn-pill {
+      font-family: 'Cinzel', serif;
+      font-size: 0.72rem;
+      letter-spacing: 0.8px;
+      color: var(--blog-title-color, var(--accent-light));
+      text-align: center;
+      min-height: 1.2em;
+    }
+
+    /* REJILLA 4 DE ANCHO POR 5 DE LARGO PARA MEMORAMA (OPTIMIZADA PARA CELULAR) */
+    .memorama-grid-4x5 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: clamp(5px, 1.7vw, 8px);
+      width: 100%;
+      max-width: min(100%, 344px, calc((100dvh - 185px) * 0.77));
+      margin: 0 auto;
+      box-sizing: border-box;
+      touch-action: manipulation;
+    }
+
+    .memorama-card {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      perspective: 700px;
+      background: transparent;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      outline: none;
+    }
+
+    .memorama-card:disabled {
+      cursor: default;
+    }
+
+    .memorama-card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+      transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: transform;
+    }
+
+    .memorama-card.is-flipped .memorama-card-inner,
+    .memorama-card.is-matched .memorama-card-inner {
+      transform: rotateY(180deg);
+    }
+
+    .memorama-card-face {
+      position: absolute;
+      inset: 0;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      border-radius: 12px 12px 5px 5px;
+      overflow: hidden;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .memorama-card-back {
+      background: radial-gradient(circle at 50% 35%, rgba(36, 48, 82, 0.42), rgba(7, 9, 15, 0.96) 76%);
+      border: 1px solid var(--blog-border-subtle, rgba(90, 116, 191, 0.52));
+      box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.85), 0 2px 8px rgba(0, 0, 0, 0.65);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .memorama-card:not(.is-flipped):not(.is-matched):active .memorama-card-back {
+      border-color: var(--white);
+      box-shadow: 0 0 12px var(--blog-glow, rgba(140, 162, 230, 0.65));
+    }
+
+    .memorama-card-back-emblem {
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: clamp(1rem, 4.2vw, 1.35rem);
+      color: rgba(140, 162, 230, 0.68);
+      text-shadow: 0 0 8px rgba(90, 116, 191, 0.5);
+      pointer-events: none;
+    }
+
+    .memorama-card-front {
+      transform: rotateY(180deg);
+      background: #06080d;
+      border: 1.5px solid var(--blog-title-color, var(--accent-light));
+      box-shadow: 0 0 12px var(--blog-glow-soft, rgba(90, 116, 191, 0.35));
+    }
+
+    .memorama-card.is-matched .memorama-card-front {
+      border-color: rgba(140, 215, 175, 0.85);
+      box-shadow: 0 0 14px rgba(100, 205, 150, 0.38);
+    }
+
+    .memorama-card.is-matched-pc .memorama-card-front {
+      border-color: rgba(218, 146, 255, 0.85);
+      box-shadow: 0 0 14px rgba(185, 110, 235, 0.38);
+    }
+
+    .memorama-card-front img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* REJILLA 6X6 (OPTIMIZADA PARA CELULAR) */
+    .sixbysix-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: clamp(4px, 1.3vw, 7px);
+      width: 100%;
+      max-width: min(100%, 362px, calc(100dvh - 210px));
+      margin: 2px auto;
+      box-sizing: border-box;
+      touch-action: manipulation;
+    }
+
+    .sixbysix-cell {
+      appearance: none;
+      -webkit-appearance: none;
+      aspect-ratio: 1 / 1;
+      width: 100%;
+      padding: 0;
+      border-radius: 9px 9px 4px 4px;
+      background: linear-gradient(165deg, rgba(20, 26, 42, 0.92), rgba(7, 9, 15, 0.96));
+      border: 1px solid var(--blog-border-subtle, rgba(90, 116, 191, 0.5));
+      color: var(--white);
+      font-family: 'Cinzel', serif;
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(0.92rem, 3.9vw, 1.18rem);
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.78), 0 2px 6px rgba(0, 0, 0, 0.6);
+      transition: transform 0.14s ease, opacity 0.16s ease, border-color 0.16s ease, background-color 0.16s ease, visibility 0s linear 0s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      outline: none;
+    }
+
+    .sixbysix-cell:not(.is-non-interactive):not(.is-disappeared):active {
+      transform: scale(0.92);
+      border-color: var(--blog-title-color, var(--accent-light));
+      background: rgba(90, 116, 191, 0.28);
+    }
+
+    .sixbysix-cell.is-disappeared {
+      opacity: 0;
+      transform: scale(0.68);
+      pointer-events: none;
+      visibility: hidden;
+      transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
+    }
+
+    .sixbysix-cell.is-wrong-tap {
+      border-color: #ff6b6b !important;
+      background: rgba(190, 45, 45, 0.34) !important;
+      animation: sixCellShake 0.2s ease;
+    }
+
+    .sixbysix-cell.is-non-interactive {
+      pointer-events: none;
+      cursor: default;
+    }
+
+    @keyframes sixCellShake {
+      0%, 100% { transform: translateX(0); }
+      30% { transform: translateX(-3px); }
+      70% { transform: translateX(3px); }
+    }
+
+    /* PANTALLA LIGERA DE RESULTADO AL TERMINAR JUEGO */
+    .minigame-result-panel {
+      width: 100%;
+      padding: 20px 12px 8px 12px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      box-sizing: border-box;
+      animation: modalFadeIn 0.26s ease;
+    }
+
+    .minigame-result-title {
+      font-family: 'Cinzel Decorative', 'Cinzel', serif;
+      font-size: clamp(1.32rem, 5.2vw, 1.8rem);
+      color: var(--blog-title-color, var(--white));
+      margin: 0;
+      text-shadow: 0 0 18px var(--blog-glow, rgba(90, 116, 191, 0.55));
+      line-height: 1.28;
+    }
+
+    .minigame-result-subtitle {
+      font-family: 'Cinzel', serif;
+      font-variant-numeric: tabular-nums;
+      font-size: 1.04rem;
+      color: var(--accent-light);
+      margin: 0;
+    }
+
+    .minigame-result-buttons {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+      width: 100%;
+    }
+
+    .minigame-result-primary-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      width: 100%;
+    }

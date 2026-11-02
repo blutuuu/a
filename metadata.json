@@ -1,0 +1,8 @@
+{
+  "name": "belutu",
+  "description": "Sitio web de Blutu con sección de pensamientos, música y galerías",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

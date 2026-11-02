@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        (request.auth.token.email == 'tapiascristian131@gmail.com' || request.auth.token.email == 'bbblutu@gmail.com');
+    }
+
+    function isValidCommentCreate(data) {
+      return data.keys().hasAll(['name', 'content', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'content', 'createdAt', 'symbol']) &&
+        data.name is string &&
+        data.name.size() >= 1 &&
+        data.name.size() <= 50 &&
+        data.content is string &&
+        data.content.size() >= 1 &&
+        data.content.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        data.createdAt == request.time &&
+        (!('symbol' in data) || (data.symbol is string && data.symbol.size() <= 10));
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['name', 'content', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'content', 'createdAt', 'symbol', 'reply', 'replyAuthor', 'replyCreatedAt', 'replyUpdatedAt']) &&
+        data.name is string &&
+        data.name.size() >= 1 &&
+        data.name.size() <= 50 &&
+        data.content is string &&
+        data.content.size() >= 1 &&
+        data.content.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        (!('symbol' in data) || (data.symbol is string && data.symbol.size() <= 10)) &&
+        (!('reply' in data) || (data.reply is string && data.reply.size() >= 1 && data.reply.size() <= 1000)) &&
+        (!('replyAuthor' in data) || (data.replyAuthor is string && data.replyAuthor.size() >= 1 && data.replyAuthor.size() <= 50)) &&
+        (!('replyCreatedAt' in data) || data.replyCreatedAt is timestamp) &&
+        (!('replyUpdatedAt' in data) || data.replyUpdatedAt is timestamp);
+    }
+
+    function isValidSiteData(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+        data.keys().hasOnly(['posts', 'galleries', 'galleryOrder', 'live', 'merch', 'buzon', 'muro', 'updatedAt']) &&
+        (!('posts' in data) || (data.posts is list && data.posts.size() <= 500)) &&
+        (!('galleries' in data) || (data.galleries is map && data.galleries.size() <= 50)) &&
+        (!('galleryOrder' in data) || (data.galleryOrder is list && data.galleryOrder.size() <= 50)) &&
+        (!('live' in data) || (data.live is map && data.live.size() <= 20)) &&
+        (!('merch' in data) || (data.merch is map && data.merch.size() <= 20)) &&
+        (!('buzon' in data) || (data.buzon is map && data.buzon.size() <= 20)) &&
+        (!('muro' in data) || (data.muro is map && data.muro.size() <= 20)) &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidBlogPost(data) {
+      return data.keys().hasAll(['id', 'title', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'date', 'dateIso', 'image', 'imageCaption', 'imageFit', 'imageAura', 'hidden', 'preview', 'content', 'permanentAnchor', 'isArchived', 'updatedAt', 'archivedAt']) &&
+        data.id is string &&
+        data.id.size() >= 1 &&
+        data.id.size() <= 128 &&
+        data.title is string &&
+        data.title.size() <= 300 &&
+        (!('date' in data) || (data.date is string && data.date.size() <= 100)) &&
+        (!('dateIso' in data) || (data.dateIso is string && data.dateIso.size() <= 40)) &&
+        (!('image' in data) || (data.image is string && data.image.size() <= 500000)) &&
+        (!('imageCaption' in data) || (data.imageCaption is string && data.imageCaption.size() <= 500)) &&
+        (!('imageFit' in data) || (data.imageFit is string && data.imageFit.size() <= 50)) &&
+        (!('imageAura' in data) || (data.imageAura is string && data.imageAura.size() <= 50)) &&
+        (!('hidden' in data) || data.hidden is bool) &&
+        (!('preview' in data) || (data.preview is string && data.preview.size() <= 2000)) &&
+        (!('content' in data) || (data.content is string && data.content.size() <= 500000)) &&
+        (!('permanentAnchor' in data) || data.permanentAnchor is bool) &&
+        (!('isArchived' in data) || data.isArchived is bool) &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time &&
+        (!('archivedAt' in data) || data.archivedAt is timestamp);
+    }
+
+    function isValidBlogBackup(data) {
+      return data.keys().hasAll(['posts', 'updatedAt']) &&
+        data.keys().hasOnly(['posts', 'updatedAt', 'lastPostSaved']) &&
+        data.posts is list &&
+        data.posts.size() <= 500 &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time &&
+        (!('lastPostSaved' in data) || (data.lastPostSaved is string && data.lastPostSaved.size() <= 128));
+    }
+
+    match /comments/{commentId} {
+      allow get: if isValidId(commentId);
+      allow list: if request.query.limit != null && request.query.limit <= 100;
+      allow create: if isValidId(commentId) && isValidCommentCreate(request.resource.data);
+      allow update: if isAdmin() &&
+        isValidId(commentId) &&
+        isValidComment(request.resource.data) &&
+        request.resource.data.name == resource.data.name &&
+        request.resource.data.content == resource.data.content &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reply', 'replyAuthor', 'replyCreatedAt', 'replyUpdatedAt']);
+      allow delete: if isAdmin() && isValidId(commentId);
+    }
+
+    match /site_data/{docId} {
+      allow get: if docId == 'main';
+      allow list: if false;
+      allow create, update: if isAdmin() && docId == 'main' && isValidSiteData(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /blog_posts/{postId} {
+      allow get: if isValidId(postId);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(postId) && isValidBlogPost(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /blog_backups/{backupId} {
+      allow get: if isAdmin() && isValidId(backupId);
+      allow list: if false;
+      allow create, update: if isAdmin() && backupId == 'latest_posts_backup' && isValidBlogBackup(request.resource.data);
+      allow delete: if false;
+    }
+  }
+}
