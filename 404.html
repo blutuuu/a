@@ -5,18 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Blutu</title>
   <meta name="robots" content="noindex">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <style>html,body{background:#050508;color:#8ca2e6;margin:0;padding:0;}</style>
   <script>
     (function () {
+      var targetUrl = '/';
       try {
         var rawPath = window.location.pathname || '/';
         var clean = decodeURIComponent(rawPath).replace(/^\/+|\/+$/g, '');
         if (clean && clean !== 'index.html' && clean !== '404.html') {
           try { sessionStorage.setItem('blutu_spa_route', clean); } catch (e) {}
           try { window.name = '__blutu_spa__:' + clean; } catch (e) {}
+          targetUrl = '/?s=' + encodeURIComponent(clean);
         }
       } catch (err) {}
-      window.location.replace('/');
+      window.location.replace(targetUrl);
     })();
   </script>
 </head>

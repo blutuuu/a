@@ -24,6 +24,7 @@ import {
   BlutuVault,
   normalizePostStr,
   arePostsIdentical,
+  computeCanonicalSafePostId,
   getDeletedPostIdsSet,
   setDeletedPostIds,
   markPostIdsDeleted,
@@ -31,6 +32,7 @@ import {
   unmarkPostDeleted,
   isDeletedPost,
   deduplicatePosts,
+  fastHashStr,
   computePostsQuickSignature,
   markPostsPendingCloudSync,
   removePostPendingCloudSync,
@@ -107,8 +109,15 @@ purgeObsoleteLocalStorage();
 initFreshServerVersionCheck(() => blutuBuildTimestamp);
 initMobileAppDeepLinks();
 
-    function reconcileAndMergePosts(incomingPosts, skipRender = false) {
+    function reconcileAndMergePosts(incomingPosts, optionsOrSkip = false) {
       if (!Array.isArray(incomingPosts) || incomingPosts.length === 0) return;
+
+      const skipRender = typeof optionsOrSkip === 'boolean'
+        ? optionsOrSkip
+        : Boolean(optionsOrSkip && optionsOrSkip.skipRender);
+      const preferCurrentOnTie = Boolean(
+        optionsOrSkip && typeof optionsOrSkip === 'object' && optionsOrSkip.preferCurrentOnTie
+      );
 
       const current = Array.isArray(window.postsData) && window.postsData.length > 0 
         ? window.postsData 
@@ -119,8 +128,11 @@ initMobileAppDeepLinks();
       const cleanIncoming = deduplicatePosts(incomingPosts);
       const prevSig = computePostsQuickSignature(cleanCurrent);
 
-      // Fusión priorizando primero cambios locales pendientes de nube, luego bóveda/cloud entrante, luego memoria
-      const merged = deduplicatePosts([...pendingUnsynced, ...cleanIncoming, ...cleanCurrent])
+      // Si ya hidratamos desde Firestore y esta llamada proviene de IndexedDB local, no pisar empates contra la nube viva
+      const orderedPool = preferCurrentOnTie
+        ? [...pendingUnsynced, ...cleanCurrent, ...cleanIncoming]
+        : [...pendingUnsynced, ...cleanIncoming, ...cleanCurrent];
+      const merged = deduplicatePosts(orderedPool)
         .sort((a, b) => new Date(b.dateIso || 0) - new Date(a.dateIso || 0));
       const nextSig = computePostsQuickSignature(merged);
 
@@ -153,6 +165,7 @@ initMobileAppDeepLinks();
         if (typeof renderBlogPosts === 'function') renderBlogPosts();
         if (typeof populatePostSelect === 'function') populatePostSelect();
         if (typeof renderAdminPostsList === 'function') renderAdminPostsList();
+        if (typeof refreshOpenVisitorModalsIfChanged === 'function') refreshOpenVisitorModalsIfChanged();
         if (typeof checkPendingSharedDeepLink === 'function') checkPendingSharedDeepLink();
       }
     }
@@ -244,11 +257,11 @@ initMobileAppDeepLinks();
     postsData = deduplicatePosts([...getPendingCloudSyncPosts(), ...postsData]);
     window.postsData = postsData;
 
-    // Cargar de forma resiliente desde IndexedDB BlutuVault saneado
+    // Cargar de forma resiliente desde IndexedDB BlutuVault saneado sin pisar datos ya hidratados desde Firestore
     if (typeof BlutuVault !== 'undefined') {
       BlutuVault.getAllPosts().then(dbPosts => {
-        if (Array.isArray(dbPosts) && dbPosts.length > 0) {
-          reconcileAndMergePosts(dbPosts);
+        if (Array.isArray(dbPosts) && dbPosts.length > 0 && !isAdminMode) {
+          reconcileAndMergePosts(dbPosts, { preferCurrentOnTie: Boolean(window.__hasHydratedRemoteSiteData) });
         }
       }).catch(() => {});
     }
@@ -491,6 +504,10 @@ try {
 
     function getVisibleBlogPosts() {
       const source = deduplicatePosts(Array.isArray(window.postsData) ? window.postsData : postsData);
+      if (Array.isArray(postsData) && source.length !== postsData.length) {
+        postsData = source;
+        window.postsData = source;
+      }
       return (typeof isAdminMode !== 'undefined' && isAdminMode) ? source : source.filter(post => !post.hidden);
     }
 
@@ -1699,15 +1716,63 @@ try {
     }
     window.applyBlogModalAdaptiveTheme = applyBlogModalAdaptiveTheme;
 
-    function openBlogModal(postIndex, forcePreview = false) {
+    let currentOpenBlogPostId = '';
+    let currentOpenBlogShareSlug = '';
+    let currentOpenBlogRenderedSig = '';
+    let currentOpenMerchItemId = '';
+    let currentOpenMerchRenderedSig = '';
+
+    function computeSingleBlogPostRenderSig(post) {
+      if (!post) return '';
+      return [
+        post.id || '',
+        fastHashStr(post.title),
+        post.date || '',
+        post.dateIso || '',
+        fastHashStr(post.image),
+        fastHashStr(post.imageCaption),
+        post.imageFit || 'cover-center',
+        post.imageAura || '',
+        post.backBtnColor || '',
+        fastHashStr(post.content)
+      ].join('|');
+    }
+
+    function computeSingleMerchRenderSig(item) {
+      if (!item) return '';
+      const imgs = Array.isArray(item.images) ? item.images : [];
+      return [
+        item.id || '',
+        fastHashStr(item.name),
+        item.price || '',
+        item.originalPrice || '',
+        item.category || '',
+        item.badge || '',
+        item.visible !== false ? '1' : '0',
+        fastHashStr(item.description),
+        fastHashStr(item.image),
+        imgs.map(fastHashStr).join(',')
+      ].join('|');
+    }
+
+    function openBlogModal(postIndex, forcePreview = false, options = {}) {
       const post = postsData[postIndex];
       if (!post) return;
 
-      if (typeof destroyActiveMiniGame === 'function') {
+      const isSilentRefresh = Boolean(options && options.isSilentRefresh);
+      const skipHistoryPush = Boolean(options && options.skipHistoryPush) || isSilentRefresh;
+      const preserveScrollTop = (options && typeof options.preserveScrollTop === 'number')
+        ? options.preserveScrollTop
+        : null;
+
+      if (!isSilentRefresh && typeof destroyActiveMiniGame === 'function') {
         destroyActiveMiniGame();
       }
       currentGameBlogKey = null;
       currentBlogIndex = postIndex;
+      currentOpenBlogPostId = String(post.id || '').trim();
+      currentOpenBlogShareSlug = getBlogPostShareSlug(post, postIndex);
+      currentOpenBlogRenderedSig = computeSingleBlogPostRenderSig(post);
       const modalBody = document.getElementById('blogModalBody');
       if (!modalBody) return;
 
@@ -1789,11 +1854,17 @@ try {
 
       document.getElementById('blogReadModal').style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      pushModalState('blog', '/' + getBlogPostShareSlug(post, postIndex));
-      if (modalBox) modalBox.scrollTop = 0;
+      if (!skipHistoryPush) {
+        pushModalState('blog', '/' + currentOpenBlogShareSlug);
+      }
+      if (modalBox) {
+        modalBox.scrollTop = preserveScrollTop !== null ? preserveScrollTop : 0;
+      }
 
       applyBlogModalAdaptiveTheme(post, modalBody);
-      triggerBlogParagraphsOpeningReveal(modalBody);
+      if (!isSilentRefresh) {
+        triggerBlogParagraphsOpeningReveal(modalBody);
+      }
 
       requestAnimationFrame(() => applyLiveBlogImagesAura(modalBody, post));
 
@@ -1806,6 +1877,27 @@ try {
     }
 
     const OFFICIAL_BLUTU_ORIGIN = 'https://blutu.org';
+
+    function getShareBaseOrigin() {
+      try {
+        const host = String(window.location.hostname || '').toLowerCase();
+        if (host === 'blutu.org' || host === 'www.blutu.org') {
+          return OFFICIAL_BLUTU_ORIGIN;
+        }
+        const origin = String(window.location.origin || '').trim().replace(/\/+$/, '');
+        if (origin && origin !== 'null' && /^https?:\/\//i.test(origin)) {
+          return origin;
+        }
+      } catch (e) {}
+      return OFFICIAL_BLUTU_ORIGIN;
+    }
+
+    function getShareDisplayHost(originStr) {
+      return String(originStr || OFFICIAL_BLUTU_ORIGIN)
+        .replace(/^https?:\/\//i, '')
+        .replace(/^www\./i, '')
+        .replace(/\/+$/, '');
+    }
 
     function buildCleanShareSlug(rawText, fallbackPrefix = 'pensamiento') {
       const str = String(rawText || '').trim();
@@ -1907,6 +1999,9 @@ try {
       }
       currentBlogIndex = null;
       currentGameBlogKey = null;
+      currentOpenBlogPostId = '';
+      currentOpenBlogShareSlug = '';
+      currentOpenBlogRenderedSig = '';
       popModalState('blog');
       if (modal) modal.style.display = 'none';
       if (body) body.innerHTML = '';
@@ -1946,7 +2041,10 @@ try {
 
     async function shareCurrentBlog() {
       if (isAdminMode && typeof syncLiveBlogModalToMemory === 'function') {
-        syncLiveBlogModalToMemory(false);
+        syncLiveBlogModalToMemory(true);
+        if (typeof window.persistSiteDataInRealtime === 'function') {
+          window.persistSiteDataInRealtime(true, { allowAuthPopup: false });
+        }
       }
       const post = getActiveEditableBlogPost();
       if (!post) return;
@@ -1955,7 +2053,8 @@ try {
       const slug = currentGameBlogKey
         ? getGameBlogShareSlug(currentGameBlogKey)
         : getBlogPostShareSlug(post, currentBlogIndex ?? 0);
-      const shareUrl = `${OFFICIAL_BLUTU_ORIGIN}/${slug}`;
+      const baseOrigin = getShareBaseOrigin();
+      const shareUrl = `${baseOrigin}/${slug}`;
 
       if (typeof navigator.share === 'function') {
         try {
@@ -1969,7 +2068,7 @@ try {
         }
       }
 
-      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: blutu.org/${slug}`);
+      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: ${getShareDisplayHost(baseOrigin)}/${slug}`);
     }
 
     async function shareCurrentMerch(realIdx) {
@@ -1978,7 +2077,8 @@ try {
 
       const cleanName = String(item.name || 'Merch Blutu').trim() || 'Merch Blutu';
       const slug = getMerchItemShareSlug(item, realIdx);
-      const shareUrl = `${OFFICIAL_BLUTU_ORIGIN}/${slug}`;
+      const baseOrigin = getShareBaseOrigin();
+      const shareUrl = `${baseOrigin}/${slug}`;
 
       if (typeof navigator.share === 'function') {
         try {
@@ -1992,10 +2092,13 @@ try {
         }
       }
 
-      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: blutu.org/${slug}`);
+      await copyShareUrlFallback(shareUrl, `🔗 Enlace copiado: ${getShareDisplayHost(baseOrigin)}/${slug}`);
     }
 
     let hasResolvedInitialSharedDeepLink = false;
+    let deepLinkCloudWaitTimedOut = false;
+    let deepLinkCloudFallbackTimer = null;
+
     function consumeStoredDeepLinkMarkers() {
       try { sessionStorage.removeItem('blutu_spa_route'); } catch (e) {}
       try {
@@ -2044,13 +2147,34 @@ try {
           } catch (e) {}
         }
 
+        const hasTarget = Boolean(slug || gameParam || blogParam || merchParam);
+        window.__hasInitialDeepLinkPending = hasTarget;
         return { slug, gameParam, blogParam, merchParam };
       } catch (e) {
+        window.__hasInitialDeepLinkPending = false;
         return { slug: '', gameParam: '', blogParam: '', merchParam: '' };
       }
     })();
 
+    function ensureDeepLinkCloudFallbackTimer() {
+      if (deepLinkCloudFallbackTimer || deepLinkCloudWaitTimedOut) return;
+      deepLinkCloudFallbackTimer = setTimeout(() => {
+        deepLinkCloudFallbackTimer = null;
+        deepLinkCloudWaitTimedOut = true;
+        checkPendingSharedDeepLink();
+      }, 1600);
+    }
+
+    function clearDeepLinkCloudFallbackTimer() {
+      window.__hasInitialDeepLinkPending = false;
+      if (deepLinkCloudFallbackTimer) {
+        clearTimeout(deepLinkCloudFallbackTimer);
+        deepLinkCloudFallbackTimer = null;
+      }
+    }
+
     function prepareBaseHomepageHistoryBeforeDeepLink() {
+      clearDeepLinkCloudFallbackTimer();
       consumeStoredDeepLinkMarkers();
       try {
         window.history.replaceState(null, '', '/');
@@ -2062,7 +2186,13 @@ try {
       const { slug, gameParam, blogParam, merchParam } = initialCapturedDeepLink;
       if (!slug && !gameParam && !blogParam && !merchParam) return;
 
-      // 1. Verificar coincidencia con ruta limpia blutu.org/<slug>
+      // Esperar a que Firestore entregue el estado actual del sitio para nunca abrir primero la versión por defecto/caché vieja
+      if (!window.__hasHydratedRemoteSiteData && !deepLinkCloudWaitTimedOut) {
+        ensureDeepLinkCloudFallbackTimer();
+        return;
+      }
+
+      // 1. Verificar coincidencia con ruta limpia <origen>/<slug>
       if (slug) {
         let decodedSlug = slug;
         try { decodedSlug = decodeURIComponent(slug); } catch (e) {}
@@ -2092,7 +2222,7 @@ try {
           return;
         }
 
-        // 1b. Productos de Merch (blutu.org/merch-...)
+        // 1b. Productos de Merch (<origen>/merch-...)
         if (cleanLower.startsWith('merch-') || slugNorm.startsWith('merch-')) {
           const mList = Array.isArray(merchItemsData) ? merchItemsData : [];
           const mIdx = mList.findIndex((it, idx) => it && it.visible !== false && (
@@ -2107,7 +2237,7 @@ try {
           }
         }
 
-        // 1c. Blogs de Pensamientos (blutu.org/<slug>)
+        // 1c. Blogs de Pensamientos (<origen>/<slug>)
         const list = (Array.isArray(window.postsData) && window.postsData.length > 0)
           ? window.postsData
           : (Array.isArray(postsData) ? postsData : []);
@@ -2127,6 +2257,9 @@ try {
           hasResolvedInitialSharedDeepLink = true;
           prepareBaseHomepageHistoryBeforeDeepLink();
           openBlogModal(foundIdx, true);
+          if (typeof window.verifySingleSharedPostFromServer === 'function' && postsData[foundIdx]) {
+            window.verifySingleSharedPostFromServer(postsData[foundIdx]);
+          }
           return;
         }
       }
@@ -2163,6 +2296,9 @@ try {
           hasResolvedInitialSharedDeepLink = true;
           prepareBaseHomepageHistoryBeforeDeepLink();
           openBlogModal(foundIdx, true);
+          if (typeof window.verifySingleSharedPostFromServer === 'function' && postsData[foundIdx]) {
+            window.verifySingleSharedPostFromServer(postsData[foundIdx]);
+          }
           return;
         }
       }
@@ -2592,18 +2728,29 @@ try {
       `;
     }
 
-    function openGameBlogModal(gameKey, forcePreview = false) {
+    function openGameBlogModal(gameKey, forcePreview = false, options = {}) {
       if (!gamesData || !gamesData.blogs || !gamesData.blogs[gameKey]) return;
       if (gameKey === 'memorama' || gameKey === 'sixbysix') {
         ensureGamesEngineLoaded();
       }
 
-      destroyActiveMiniGame();
-      window.__isMiniGameScreenOpen = false;
+      const isSilentRefresh = Boolean(options && options.isSilentRefresh);
+      const skipHistoryPush = Boolean(options && options.skipHistoryPush) || isSilentRefresh;
+      const preserveScrollTop = (options && typeof options.preserveScrollTop === 'number')
+        ? options.preserveScrollTop
+        : null;
+
+      if (!isSilentRefresh) {
+        destroyActiveMiniGame();
+        window.__isMiniGameScreenOpen = false;
+      }
       currentBlogIndex = null;
       currentGameBlogKey = gameKey;
 
       const post = gamesData.blogs[gameKey];
+      currentOpenBlogPostId = 'game_' + gameKey;
+      currentOpenBlogShareSlug = getGameBlogShareSlug(gameKey);
+      currentOpenBlogRenderedSig = computeSingleBlogPostRenderSig(post);
       const modalBody = document.getElementById('blogModalBody');
       const modalEl = document.getElementById('blogReadModal');
       const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
@@ -2670,11 +2817,17 @@ try {
 
       modalEl.style.display = 'flex';
       document.body.style.overflow = 'hidden';
-      pushModalState('blog', '/' + getGameBlogShareSlug(gameKey));
-      if (modalBox) modalBox.scrollTop = 0;
+      if (!skipHistoryPush) {
+        pushModalState('blog', '/' + currentOpenBlogShareSlug);
+      }
+      if (modalBox) {
+        modalBox.scrollTop = preserveScrollTop !== null ? preserveScrollTop : 0;
+      }
 
       applyBlogModalAdaptiveTheme(post, modalBody);
-      triggerBlogParagraphsOpeningReveal(modalBody);
+      if (!isSilentRefresh) {
+        triggerBlogParagraphsOpeningReveal(modalBody);
+      }
       requestAnimationFrame(() => applyLiveBlogImagesAura(modalBody, post));
     }
     window.openGameBlogModal = openGameBlogModal;
@@ -6566,20 +6719,41 @@ try {
       const deletedPost = postsData[idx];
       const deletedTitle = deletedPost.title || 'Publicación';
       const exactId = String(deletedPost.id || '').trim();
+      const canonicalCloudId = computeCanonicalSafePostId(deletedPost);
       const fallbackComposite = String((deletedPost.title || '') + '_' + (deletedPost.dateIso || '')).trim();
 
-      // Registrar únicamente el ID exacto cuando existe (evita bloquear futuros blogs con el mismo título o "Sin Título")
-      markPostIdsDeleted(exactId ? [exactId] : [fallbackComposite]);
+      // Recolectar cualquier mellizo/duplicado heredado del mismo post para eliminarlo de una sola vez sin dejar copias fantasma
+      const idsToMarkDeleted = new Set();
+      if (exactId) idsToMarkDeleted.add(exactId);
+      if (canonicalCloudId && !/^post_(\d{4}-\d{2}-\d{2}|date)$/i.test(canonicalCloudId)) {
+        idsToMarkDeleted.add(canonicalCloudId);
+      }
+      if (!exactId && fallbackComposite) {
+        idsToMarkDeleted.add(fallbackComposite);
+      }
+
+      postsData.forEach((p) => {
+        if (p && arePostsIdentical(p, deletedPost)) {
+          if (p.id) idsToMarkDeleted.add(String(p.id).trim());
+          removePostPendingCloudSync(p);
+        }
+      });
+
+      markPostIdsDeleted(Array.from(idsToMarkDeleted));
       removePostPendingCloudSync(deletedPost);
 
-      // 1. Eliminar del array postsData y alinear índice activo del modal
-      const wasOpenDeletedPost = (currentBlogIndex === idx);
+      // 1. Eliminar del array postsData (incluyendo mellizos idénticos si existían) y alinear índice activo del modal
+      const activeOpenPostRef = (typeof currentBlogIndex === 'number' && postsData[currentBlogIndex])
+        ? postsData[currentBlogIndex]
+        : null;
+      const wasOpenDeletedPost = (currentBlogIndex === idx) || Boolean(activeOpenPostRef && arePostsIdentical(activeOpenPostRef, deletedPost));
+      postsData = postsData.filter((p, i) => i !== idx && !(p && arePostsIdentical(p, deletedPost)));
       if (wasOpenDeletedPost) {
         currentBlogIndex = null;
-      } else if (typeof currentBlogIndex === 'number' && currentBlogIndex > idx) {
-        currentBlogIndex--;
+      } else if (activeOpenPostRef) {
+        const nextOpenIdx = postsData.indexOf(activeOpenPostRef);
+        currentBlogIndex = nextOpenIdx !== -1 ? nextOpenIdx : null;
       }
-      postsData.splice(idx, 1);
 
       // 2. Sincronizar referencia global de window
       window.postsData = postsData;
@@ -9110,6 +9284,9 @@ try {
       const item = merchItemsData[realIdx];
       if (!item) return;
 
+      currentOpenMerchItemId = String(item.id || item.name || realIdx).trim();
+      currentOpenMerchRenderedSig = computeSingleMerchRenderSig(item);
+
       const cleanImages = getCleanMerchImages(item);
       renderMerchDetailModalContent(realIdx, 0);
 
@@ -9697,9 +9874,83 @@ try {
       if (typeof window.toggleBuzonVisibility === 'function') window.toggleBuzonVisibility(isBuzonSectionVisible);
       if (typeof window.renderCommentsListFromMemory === 'function') window.renderCommentsListFromMemory();
       if (typeof window.refreshAdminCommentsList === 'function') window.refreshAdminCommentsList();
+      if (typeof refreshOpenVisitorModalsIfChanged === 'function') refreshOpenVisitorModalsIfChanged();
       if (typeof checkPendingSharedDeepLink === 'function') checkPendingSharedDeepLink();
     }
     window.applyAllSectionsChangesToDOM = applyAllSectionsChangesToDOM;
+
+    function refreshOpenVisitorModalsIfChanged() {
+      if (isAdminMode) return;
+
+      // 1. Si el lector tiene abierto un blog de Pensamientos o de Juegos y llegó una versión más nueva desde Firestore, actualizar el modal abierto al instante
+      const blogModalEl = document.getElementById('blogReadModal');
+      if (blogModalEl && blogModalEl.style.display === 'flex' && !window.__isMiniGameScreenOpen && !window.activeMiniGame) {
+        const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
+        const prevScroll = modalBox ? modalBox.scrollTop : 0;
+
+        if (currentGameBlogKey && gamesData && gamesData.blogs && gamesData.blogs[currentGameBlogKey]) {
+          const gPost = gamesData.blogs[currentGameBlogKey];
+          const nextSig = computeSingleBlogPostRenderSig(gPost);
+          if (nextSig && nextSig !== currentOpenBlogRenderedSig) {
+            openGameBlogModal(currentGameBlogKey, true, {
+              isSilentRefresh: true,
+              skipHistoryPush: true,
+              preserveScrollTop: prevScroll
+            });
+          }
+        } else {
+          const list = Array.isArray(postsData) ? postsData : [];
+          let resolvedIdx = -1;
+          if (currentOpenBlogPostId) {
+            resolvedIdx = list.findIndex(p => p && String(p.id || '').trim() === currentOpenBlogPostId);
+          }
+          if (resolvedIdx === -1 && currentOpenBlogShareSlug) {
+            resolvedIdx = list.findIndex((p, idx) => p && getBlogPostShareSlug(p, idx) === currentOpenBlogShareSlug);
+          }
+          if (resolvedIdx === -1 && typeof currentBlogIndex === 'number' && list[currentBlogIndex]) {
+            resolvedIdx = currentBlogIndex;
+          }
+          if (resolvedIdx !== -1 && list[resolvedIdx]) {
+            currentBlogIndex = resolvedIdx;
+            const nextPost = list[resolvedIdx];
+            if (nextPost.hidden) {
+              closeBlogModal(true);
+            } else {
+              const nextSig = computeSingleBlogPostRenderSig(nextPost);
+              if (nextSig && nextSig !== currentOpenBlogRenderedSig) {
+                openBlogModal(resolvedIdx, true, {
+                  isSilentRefresh: true,
+                  skipHistoryPush: true,
+                  preserveScrollTop: prevScroll
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Si el lector tiene abierto el detalle de un producto de Merch y cambió en la nube, refrescar en sitio
+      const merchModalEl = document.getElementById('merchDetailModal');
+      if (merchModalEl && merchModalEl.style.display === 'flex' && typeof currentModalMerchIdx === 'number') {
+        const mList = Array.isArray(merchItemsData) ? merchItemsData : [];
+        let mIdx = -1;
+        if (currentOpenMerchItemId) {
+          mIdx = mList.findIndex((it, idx) => it && String(it.id || it.name || idx).trim() === currentOpenMerchItemId);
+        }
+        if (mIdx === -1 && mList[currentModalMerchIdx]) {
+          mIdx = currentModalMerchIdx;
+        }
+        if (mIdx !== -1 && mList[mIdx]) {
+          currentModalMerchIdx = mIdx;
+          const nextMerchSig = computeSingleMerchRenderSig(mList[mIdx]);
+          if (nextMerchSig && nextMerchSig !== currentOpenMerchRenderedSig) {
+            currentOpenMerchRenderedSig = nextMerchSig;
+            renderMerchDetailModalContent(mIdx, currentModalImageIdx);
+          }
+        }
+      }
+    }
+    window.refreshOpenVisitorModalsIfChanged = refreshOpenVisitorModalsIfChanged;
 
     let adminEditSessionBaseline = null;
     window.__adminCloudTouchedDuringSession = false;

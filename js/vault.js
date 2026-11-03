@@ -445,7 +445,8 @@ export function hasPendingCloudSyncChanges() {
               }
             });
 
-            const needsKeyScan = shouldPrune || (deletedSet.size !== this._lastPrunedDeletedCount);
+            const effectivePrune = Boolean(shouldPrune || cleanPosts.length > 0);
+            const needsKeyScan = effectivePrune || (deletedSet.size !== this._lastPrunedDeletedCount);
             if (postsToPut.length === 0 && !needsKeyScan) {
               continue;
             }
@@ -466,7 +467,7 @@ export function hasPendingCloudSyncChanges() {
                     const existingKeys = Array.isArray(keysReq.result) ? keysReq.result : [];
                     existingKeys.forEach(existingKey => {
                       const normExisting = String(existingKey || '').trim().toLowerCase();
-                      if (deletedSet.has(normExisting) || (shouldPrune && !activeKeys.has(existingKey))) {
+                      if (deletedSet.has(normExisting) || (effectivePrune && !activeKeys.has(existingKey))) {
                         store.delete(existingKey);
                         keysToDeleteMem.push(existingKey);
                       }
@@ -535,31 +536,133 @@ export function hasPendingCloudSyncChanges() {
         .replace(/[^a-z0-9]/g, '');
     }
 
+    function stripTrailingIsoDateSuffix(idStr) {
+      let out = String(idStr || '').trim();
+      while (/(_\d{4}-\d{2}-\d{2}|_date)$/i.test(out)) {
+        const next = out.replace(/(_\d{4}-\d{2}-\d{2}|_date)$/i, '').trim();
+        if (!next || next.toLowerCase() === 'post') break;
+        out = next;
+      }
+      return out;
+    }
+
+    function isDerivedCloudDocKeyId(idStr) {
+      const raw = String(idStr || '').trim();
+      if (!raw) return true;
+      if (/^post_\d{4}-\d{2}-\d{2}$/i.test(raw)) return true;
+      if (!/^post_\d{10,}/i.test(raw) && /_\d{4}-\d{2}-\d{2}$/i.test(raw)) return true;
+      if (/^post_\d{10,}[a-z0-9_]*_\d{4}-\d{2}-\d{2}$/i.test(raw)) return true;
+      return false;
+    }
+
+    function pickBestCanonicalPostId(newer, older) {
+      const newId = String((newer && newer.id) || '').trim();
+      const oldId = String((older && older.id) || '').trim();
+      if (newId && !isDerivedCloudDocKeyId(newId)) return newId;
+      if (oldId && !isDerivedCloudDocKeyId(oldId)) return oldId;
+      const strippedNew = stripTrailingIsoDateSuffix(newId);
+      if (strippedNew && !isDerivedCloudDocKeyId(strippedNew)) return strippedNew;
+      const strippedOld = stripTrailingIsoDateSuffix(oldId);
+      if (strippedOld && !isDerivedCloudDocKeyId(strippedOld)) return strippedOld;
+      return newId || oldId || ('post_' + Date.now());
+    }
+
+    export function computeCanonicalSafePostId(post) {
+      if (!post) return '';
+      const baseIdOrTitle = stripTrailingIsoDateSuffix(post.id) || String(post.title || '').trim();
+      const rawSlug = String(baseIdOrTitle)
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .replace(/^_+|_+$/g, '') || 'post';
+      const dateSuffix = String(post.dateIso || 'date').replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (rawSlug.endsWith('_' + dateSuffix.toLowerCase())) {
+        return rawSlug.slice(0, 128);
+      }
+      return (rawSlug.substring(0, 50) + '_' + dateSuffix).slice(0, 128);
+    }
+    window.computeCanonicalSafePostId = computeCanonicalSafePostId;
+
+    function isPlaceholderPostTitle(rawTitle) {
+      const t = String(rawTitle || '').trim().toLowerCase();
+      return !t || t === 'sin título' || t === 'sin titulo' || t === 'nuevo pensamiento';
+    }
+
+    function stripBlogBodyForDuplicateCheck(rawContent) {
+      if (!rawContent) return '';
+      return String(rawContent)
+        .replace(/\[img:\s*[^\]]+\]/gi, ' ')
+        .replace(/\[\/?center\]/gi, ' ')
+        .replace(/\[color:\s*[^|]+\|([^\]]+)\]/gi, '$1')
+        .replace(/\[([^\]]+)\]\(([^\s\)]+)\)/gi, '$1')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
     export function arePostsIdentical(a, b) {
       if (!a || !b) return false;
       const idA = String(a.id || '').trim().toLowerCase();
       const idB = String(b.id || '').trim().toLowerCase();
-      // 1. Si ambos tienen ID explícito, SOLO son la misma publicación si comparten exactamente el mismo ID.
-      // Esto impide que dos blogs distintos con el mismo título o "Sin Título" se fusionen o borren entre sí.
-      if (idA && idB) {
-        return idA === idB;
+
+      // 1. Mismo ID exacto
+      if (idA && idB && idA === idB) return true;
+
+      // 2. Mismo ID base sin sufijos de fecha añadidos por antiguos documentos de respaldo (_YYYY-MM-DD)
+      const baseIdA = stripTrailingIsoDateSuffix(idA);
+      const baseIdB = stripTrailingIsoDateSuffix(idB);
+      if (baseIdA && baseIdB && baseIdA !== 'post' && baseIdA === baseIdB) {
+        return true;
       }
-      // 2. Respaldo únicamente para entradas heredadas sin ID: requiere mismo título real + misma fecha
+
       const titleA = String(a.title || '').trim();
       const titleB = String(b.title || '').trim();
-      if (!titleA || !titleB) return false;
       const lowerA = titleA.toLowerCase();
       const lowerB = titleB.toLowerCase();
-      if (lowerA === 'sin título' || lowerA === 'sin titulo' || lowerB === 'sin título' || lowerB === 'sin titulo') {
-        return false;
+      const hasRealTitleA = !isPlaceholderPostTitle(titleA);
+      const hasRealTitleB = !isPlaceholderPostTitle(titleB);
+
+      // 3. Equivalencia con clave segura de nube (<slug>_<dateIso>), protegiendo símbolos/emojis distintos en la misma fecha
+      const safeA = computeCanonicalSafePostId(a).toLowerCase();
+      const safeB = computeCanonicalSafePostId(b).toLowerCase();
+      if (safeA && safeB && safeA === safeB) {
+        const isGenericSymbolSafe = /^post_(\d{4}-\d{2}-\d{2}|date)$/i.test(safeA);
+        if (!isGenericSymbolSafe || (hasRealTitleA && lowerA === lowerB)) {
+          return true;
+        }
       }
+
       const dateA = String(a.dateIso || '').trim();
       const dateB = String(b.dateIso || '').trim();
-      if (dateA && dateB && dateA !== dateB) return false;
-      if (lowerA === lowerB) return true;
-      const slugA = normalizePostStr(titleA);
-      const slugB = normalizePostStr(titleB);
-      return Boolean(slugA && slugB && slugA === slugB && dateA === dateB);
+      const bodyA = stripBlogBodyForDuplicateCheck(a.content);
+      const bodyB = stripBlogBodyForDuplicateCheck(b.content);
+
+      // 4. Mismo contenido de artículo sustancial (>= 35 caracteres limpios), incluso si se editó el título o la fecha
+      if (bodyA.length >= 35 && bodyA === bodyB) {
+        return true;
+      }
+
+      // 5. Mismo título real (no vacío ni "Sin Título")
+      if (hasRealTitleA && hasRealTitleB) {
+        const normTitleA = normalizePostStr(titleA);
+        const normTitleB = normalizePostStr(titleB);
+        const sameRealTitle = (lowerA === lowerB) || (normTitleA.length >= 3 && normTitleA === normTitleB);
+
+        if (sameRealTitle) {
+          // 5a. Mismo título real en la misma fecha exacta -> duplicado de la misma publicación
+          if (dateA && dateB && dateA === dateB) {
+            return true;
+          }
+          // 5b. Mismo título real cuando se cambió la fecha: si comparten portada, cuerpo o al menos uno proviene de ID heredado/derivado
+          const bothModernDistinctGeneratedIds = /^post_\d{10,}/i.test(baseIdA) && /^post_\d{10,}/i.test(baseIdB);
+          const imgA = String(a.image || '').trim();
+          const imgB = String(b.image || '').trim();
+          if (!bothModernDistinctGeneratedIds || (imgA && imgA === imgB) || (bodyA.length >= 12 && bodyA === bodyB)) {
+            return true;
+          }
+        }
+      }
+
+      return false;
     }
 
     let deletedPostIdsCacheSet = null;
@@ -689,7 +792,7 @@ export function hasPendingCloudSyncChanges() {
           const mergedEntry = {
             ...older,
             ...newer,
-            id: String(newer.id || older.id || ('post_' + Date.now())).trim(),
+            id: pickBestCanonicalPostId(newer, older),
             title: pickStr('title'),
             date: pickStr('date'),
             dateIso: pickStr('dateIso'),
@@ -705,9 +808,10 @@ export function hasPendingCloudSyncChanges() {
           if (bestCreatedAt) mergedEntry.createdAt = bestCreatedAt;
           result[existingIndex] = mergedEntry;
         } else {
+          const cleanSingleId = pickBestCanonicalPostId(p, null);
           const entryCopy = {
             ...p,
-            id: String(p.id || ('post_' + Date.now())).trim()
+            id: cleanSingleId
           };
           const normUpd = normalizeStoredTimestampIso(p.updatedAt);
           if (normUpd) entryCopy.updatedAt = normUpd;
@@ -720,19 +824,33 @@ export function hasPendingCloudSyncChanges() {
     }
     window.deduplicatePosts = deduplicatePosts;
 
+    export function fastHashStr(rawStr) {
+      const s = String(rawStr || '');
+      const len = s.length;
+      if (len === 0) return '0';
+      let h = 2166136261;
+      for (let i = 0; i < len; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return len + '_' + (h >>> 0).toString(36);
+    }
+    window.fastHashStr = fastHashStr;
+
     export function computePostsQuickSignature(list) {
       if (!Array.isArray(list) || list.length === 0) return '';
       return list.map(p => [
         p.id || '',
-        p.title || '',
+        fastHashStr(p.title),
         p.dateIso || '',
+        p.date || '',
         p.hidden ? '1' : '0',
         p.imageFit || '',
         p.imageAura || '',
-        (p.image || '').length,
-        p.imageCaption || '',
-        p.preview || '',
-        (p.content || '').length,
+        fastHashStr(p.image),
+        fastHashStr(p.imageCaption),
+        fastHashStr(p.preview),
+        fastHashStr(p.content),
         getPostTimestampMs(p.updatedAt)
       ].join(':')).join('|');
     }

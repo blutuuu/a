@@ -1,6 +1,9 @@
 /* Blutu — Autenticación Google Admin, Muro de Visitas y Sincronización Firestore en Tiempo Real */
 import {
   deduplicatePosts,
+  arePostsIdentical,
+  computeCanonicalSafePostId,
+  isDeletedPost,
   BlutuVault,
   getDeletedPostIdsSet,
   markPostIdsDeleted,
@@ -12,6 +15,7 @@ import {
   hasPendingCloudSyncChanges,
   flushPendingCloudSyncQueueToStorage,
   computePostsQuickSignature,
+  fastHashStr,
   getPostTimestampMs
 } from "./vault.js";
 
@@ -1340,12 +1344,7 @@ import {
     }
 
     function computeSafeCloudPostId(post) {
-      const rawSlug = String(post.id || (post.title + '_' + (post.dateIso || ''))).trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, '_')
-        .replace(/^_+|_+$/g, '') || 'post';
-      const dateSuffix = String(post.dateIso || 'date').replace(/[^a-zA-Z0-9_-]/g, '_');
-      return (rawSlug.substring(0, 50) + '_' + dateSuffix).slice(0, 128);
+      return computeCanonicalSafePostId(post) || 'post_date';
     }
 
     function computePostCloudSignature(post) {
@@ -1381,15 +1380,16 @@ import {
       const postsList = Array.isArray(source.posts) ? deduplicatePosts(source.posts) : [];
       const postsSig = postsList.map(p => [
         p.id || '',
-        p.title || '',
+        fastHashStr(p.title),
         p.dateIso || '',
+        p.date || '',
         p.hidden ? '1' : '0',
         p.imageFit || 'cover-center',
         p.imageAura || '',
-        (p.image || '').length + ':' + (p.image || '').slice(-32),
-        p.imageCaption || '',
-        p.preview || '',
-        (p.content || '').length + ':' + (p.content || '').slice(0, 48) + ':' + (p.content || '').slice(-48) + ':' + (((p.content || '').match(/#[0-9a-fA-F]{3,8}/g) || []).join(''))
+        fastHashStr(p.image),
+        fastHashStr(p.imageCaption),
+        fastHashStr(p.preview),
+        fastHashStr(p.content)
       ].join('~')).join('|');
 
       const gals = (source.galleries && typeof source.galleries === 'object') ? source.galleries : {};
@@ -1402,25 +1402,25 @@ import {
         const items = Array.isArray(g.items) ? g.items : [];
         const itemsSig = items.map(it => {
           const s = it.src || it.url || '';
-          return `${s.length}:${s.slice(-28)}:${it.caption || ''}:${it.aura || ''}`;
+          return `${fastHashStr(s)}:${fastHashStr(it.caption)}:${it.aura || ''}`;
         }).join(',');
-        return `${k}:${g.title || ''}:${g.color1 || g.color || ''}:${g.color2 || ''}:[${itemsSig}]`;
+        return `${k}:${fastHashStr(g.title)}:${g.color1 || g.color || ''}:${g.color2 || ''}:[${itemsSig}]`;
       }).join('|');
 
       const liveObj = source.live || {};
       const liveBtns = Array.isArray(liveObj.buttons) ? liveObj.buttons : [];
-      const liveSig = `${Boolean(liveObj.isVisible)}:${liveObj.description || ''}:` +
-        liveBtns.map(b => `${b.name || ''}:${b.url || ''}:${b.color1 || ''}:${b.color2 || ''}:${b.visible !== false ? '1' : '0'}`).join(',');
+      const liveSig = `${Boolean(liveObj.isVisible)}:${fastHashStr(liveObj.description)}:` +
+        liveBtns.map(b => `${fastHashStr(b.name)}:${fastHashStr(b.url)}:${b.color1 || ''}:${b.color2 || ''}:${b.visible !== false ? '1' : '0'}`).join(',');
 
       const merchObj = source.merch || {};
       const mItems = Array.isArray(merchObj.items) ? merchObj.items : [];
       const mCats = Array.isArray(merchObj.categories) ? merchObj.categories : [];
       const mCfg = merchObj.cartConfig || {};
-      const merchSig = `${Boolean(merchObj.isVisible)}:${merchObj.description || ''}:[${mCats.join(',')}]:` +
-        `${mCfg.whatsappNumber || ''}:${mCfg.instagramUrl || ''}:${mCfg.noteText || ''}:${mCfg.showWhatsappBtn !== false ? '1' : '0'}:${mCfg.showInstagramBtn !== false ? '1' : '0'}:${mCfg.showCopyBtn !== false ? '1' : '0'}:${mCfg.showClearCartBtn !== false ? '1' : '0'}:` +
+      const merchSig = `${Boolean(merchObj.isVisible)}:${fastHashStr(merchObj.description)}:[${mCats.join(',')}]:` +
+        `${mCfg.whatsappNumber || ''}:${mCfg.instagramUrl || ''}:${fastHashStr(mCfg.noteText)}:${mCfg.showWhatsappBtn !== false ? '1' : '0'}:${mCfg.showInstagramBtn !== false ? '1' : '0'}:${mCfg.showCopyBtn !== false ? '1' : '0'}:${mCfg.showClearCartBtn !== false ? '1' : '0'}:` +
         mItems.map(it => {
           const imgs = Array.isArray(it.images) ? it.images : [];
-          return `${it.name || ''}:${it.price || ''}:${it.originalPrice || ''}:${it.category || ''}:${it.badge || ''}:${it.visible !== false ? '1' : '0'}:${(it.description || '').length}:${(it.image || '').slice(-24)}:${imgs.length}`;
+          return `${fastHashStr(it.name)}:${it.price || ''}:${it.originalPrice || ''}:${it.category || ''}:${it.badge || ''}:${it.visible !== false ? '1' : '0'}:${fastHashStr(it.description)}:${fastHashStr(it.image)}:${imgs.map(fastHashStr).join('+')}`;
         }).join(',');
 
       const muroObj = source.muro || source.buzon || {};
@@ -1431,10 +1431,10 @@ import {
         const gb = gd.blogs || {};
         const bSig = ['why', 'memorama', 'sixbysix'].map(k => {
           const b = gb[k] || {};
-          return `${b.title || ''}:${b.dateIso || ''}:${(b.image || '').slice(-32)}:${b.imageCaption || ''}:${b.imageFit || ''}:${b.imageAura || ''}:${(b.content || '').length}:${(b.content || '').slice(0, 40)}:${((b.content || '').match(/#[0-9a-fA-F]{3,8}/g) || []).join('')}:${b.backBtnColor || ''}`;
+          return `${fastHashStr(b.title)}:${b.dateIso || ''}:${fastHashStr(b.image)}:${fastHashStr(b.imageCaption)}:${b.imageFit || ''}:${b.imageAura || ''}:${fastHashStr(b.content)}:${b.backBtnColor || ''}`;
         }).join('|');
         const mem = gd.memorama || {};
-        const pairsSig = (Array.isArray(mem.pairImages) ? mem.pairImages : []).map(u => `${(u || '').length}:${(u || '').slice(-24)}`).join(',');
+        const pairsSig = (Array.isArray(mem.pairImages) ? mem.pairImages : []).map(u => fastHashStr(u)).join(',');
         const cropsSig = (Array.isArray(mem.pairCrops) ? mem.pairCrops : []).map(c => c || 'cover-center').join(',');
         const mSig = `${mem.soloBtnColor || ''}:${mem.vsPcBtnColor || ''}:${mem.vsPcEasyBtnColor || ''}:${mem.vsPcHardBtnColor || ''}:${mem.retryBtnColor || ''}:${mem.backBtnColor || ''}:[${pairsSig}]:[${cropsSig}]`;
         const s6 = gd.sixBySix || {};
@@ -1589,17 +1589,76 @@ import {
     let lastSavedLocalPostsQuickSig = '';
     let lastSavedLocalSiteStorageSig = '';
     let hasHydratedRemoteSiteData = false;
+    window.__hasHydratedRemoteSiteData = false;
     let resolveRemoteSiteHydrated = null;
     const remoteSiteHydratedPromise = new Promise((resolve) => {
       resolveRemoteSiteHydrated = resolve;
     });
     function markRemoteSiteDataHydrated() {
+      const wasAlreadyHydrated = hasHydratedRemoteSiteData;
       hasHydratedRemoteSiteData = true;
+      window.__hasHydratedRemoteSiteData = true;
       if (resolveRemoteSiteHydrated) {
         resolveRemoteSiteHydrated();
         resolveRemoteSiteHydrated = null;
       }
+      if (!wasAlreadyHydrated && typeof window.checkPendingSharedDeepLink === 'function') {
+        queueMicrotask(() => {
+          if (typeof window.checkPendingSharedDeepLink === 'function') {
+            window.checkPendingSharedDeepLink();
+          }
+        });
+      }
     }
+
+    async function verifySingleSharedPostFromServer(post) {
+      if (!db || !post || window.isAdminMode) return;
+      try {
+        const safeId = computeSafeCloudPostId(post);
+        if (!safeId) return;
+        const postSnap = await getDocFromServer(doc(db, 'blog_posts', safeId));
+        if (!postSnap || !postSnap.exists()) return;
+        const d = postSnap.data() || {};
+        if (d.isArchived || !d.id) return;
+        const serverMs = getPostTimestampMs(d.updatedAt);
+        const localMs = getPostTimestampMs(post.updatedAt);
+        const candidate = {
+          id: String(d.id || post.id).trim(),
+          title: typeof d.title === 'string' ? d.title : (post.title || ''),
+          date: typeof d.date === 'string' ? d.date : (post.date || ''),
+          dateIso: typeof d.dateIso === 'string' ? d.dateIso : (post.dateIso || ''),
+          image: typeof d.image === 'string' ? d.image : '',
+          imageCaption: typeof d.imageCaption === 'string' ? d.imageCaption : '',
+          imageFit: d.imageFit || post.imageFit || 'cover-center',
+          imageAura: typeof d.imageAura === 'string' ? d.imageAura : '',
+          hidden: Boolean(d.hidden),
+          preview: typeof d.preview === 'string' ? d.preview : '',
+          content: typeof d.content === 'string' ? d.content : '',
+          updatedAt: serverMs > 0 ? new Date(serverMs).toISOString() : (post.updatedAt || '')
+        };
+        const prevPostSig = computePostCloudSignature(post);
+        const nextPostSig = computePostCloudSignature(candidate);
+        if (prevPostSig === nextPostSig) return;
+        if (localMs > 0 && serverMs > 0 && serverMs < localMs) return;
+
+        const pendingLocalPosts = getPendingCloudSyncPosts();
+        const currentPosts = Array.isArray(window.postsData) ? window.postsData : [];
+        const merged = deduplicatePosts([...pendingLocalPosts, candidate, ...currentPosts]);
+        window.postsData = merged;
+        try {
+          localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(merged));
+          if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+            BlutuVault.savePosts(merged);
+          }
+        } catch (e) {}
+        if (typeof window.applyAllSectionsChangesToDOM === 'function' && !window.isAdminMode) {
+          window.applyAllSectionsChangesToDOM();
+        }
+      } catch (e) {
+        // Silencioso si está offline o si el post individual aún no existía como documento independiente
+      }
+    }
+    window.verifySingleSharedPostFromServer = verifySingleSharedPostFromServer;
 
     let hasRunCloudAnchorRecovery = false;
     let lastMissingAuthToastTime = 0;
@@ -1629,7 +1688,7 @@ import {
       }
     }
 
-    const CLOUD_ANCHOR_SESSION_KEY = 'blutu_cloud_anchor_checked_v2';
+    const CLOUD_ANCHOR_SESSION_KEY = 'blutu_cloud_anchor_checked_v3';
 
     async function recoverAnchoredBlogPostsFromCloudOnce() {
       if (!db || hasRunCloudAnchorRecovery) return;
@@ -1637,7 +1696,7 @@ import {
       const email = (auth.currentUser.email || '').toLowerCase();
       if (!ADMIN_EMAILS.includes(email)) return;
       try {
-        if (sessionStorage.getItem(CLOUD_ANCHOR_SESSION_KEY) === '1') {
+        if (sessionStorage.getItem(CLOUD_ANCHOR_SESSION_KEY) === '1' && !window.__cloudMainHadDuplicatePosts) {
           hasRunCloudAnchorRecovery = true;
           return;
         }
@@ -1670,64 +1729,107 @@ import {
 
         const snap = await getDocs(query(collection(db, 'blog_posts'), limit(250)));
         try { sessionStorage.setItem(CLOUD_ANCHOR_SESSION_KEY, '1'); } catch (e) {}
-        if (!snap || snap.empty) return;
 
         const deletedSet = getDeletedPostIdsSet();
         const currentList = deduplicatePosts([
           ...(Array.isArray(window.postsData) ? window.postsData : []),
           ...remoteMainPosts
         ]);
-        const existingIds = new Set();
-        const existingSafeIds = new Set();
-
-        currentList.forEach(p => {
-          if (!p) return;
-          if (p.id) existingIds.add(String(p.id).trim().toLowerCase());
-          existingSafeIds.add(computeSafeCloudPostId(p).toLowerCase());
-        });
 
         const recovered = [];
-        snap.forEach(docSnap => {
-          const d = docSnap.data();
-          if (!d || d.isArchived === true || d.permanentAnchor === false) return;
-          const docKeyLower = String(docSnap.id || '').trim().toLowerCase();
-          const rawId = String(d.id || docSnap.id || '').trim();
-          const rawIdLower = rawId.toLowerCase();
-          const compositeLower = String((d.title || '') + '_' + (d.dateIso || '')).trim().toLowerCase();
+        const duplicateCloudDocsToArchive = [];
+        let updatedExistingFromNewerAnchor = false;
 
-          if (deletedSet.has(rawIdLower) || deletedSet.has(docKeyLower) || (!rawIdLower && deletedSet.has(compositeLower))) {
-            return;
-          }
-          if (existingIds.has(rawIdLower) || existingSafeIds.has(docKeyLower)) {
-            return;
-          }
+        if (snap && !snap.empty) {
+          snap.forEach(docSnap => {
+            const d = docSnap.data();
+            if (!d || d.isArchived === true || d.permanentAnchor === false) return;
+            const docId = String(docSnap.id || '').trim();
+            const docKeyLower = docId.toLowerCase();
+            const rawId = String(d.id || docId || '').trim();
+            const rawIdLower = rawId.toLowerCase();
+            const compositeLower = String((d.title || '') + '_' + (d.dateIso || '')).trim().toLowerCase();
 
-          const updMs = getPostTimestampMs(d.updatedAt);
-          const recoveredPost = {
-            id: rawId,
-            title: String(d.title || ''),
-            date: String(d.date || ''),
-            dateIso: String(d.dateIso || ''),
-            image: String(d.image || ''),
-            imageCaption: String(d.imageCaption || ''),
-            imageFit: String(d.imageFit || 'cover-center'),
-            imageAura: String(d.imageAura || ''),
-            hidden: Boolean(d.hidden),
-            preview: String(d.preview || ''),
-            content: String(d.content || ''),
-            ...(updMs > 0 ? { updatedAt: new Date(updMs).toISOString() } : {})
-          };
-          lastSyncedPostSignatures.set(computeSafeCloudPostId(recoveredPost), computePostCloudSignature(recoveredPost));
-          recovered.push(recoveredPost);
-        });
+            if (deletedSet.has(rawIdLower) || deletedSet.has(docKeyLower) || deletedSet.has(compositeLower)) {
+              return;
+            }
 
-        if (recovered.length > 0) {
+            const updMs = getPostTimestampMs(d.updatedAt);
+            const recoveredPost = {
+              id: rawId,
+              title: String(d.title || ''),
+              date: String(d.date || ''),
+              dateIso: String(d.dateIso || ''),
+              image: String(d.image || ''),
+              imageCaption: String(d.imageCaption || ''),
+              imageFit: String(d.imageFit || 'cover-center'),
+              imageAura: String(d.imageAura || ''),
+              hidden: Boolean(d.hidden),
+              preview: String(d.preview || ''),
+              content: String(d.content || ''),
+              ...(updMs > 0 ? { updatedAt: new Date(updMs).toISOString() } : {})
+            };
+
+            if (isDeletedPost(recoveredPost)) return;
+
+            // Verificar si este documento en blog_posts corresponde a una publicación que YA existe en currentList
+            const matchIdx = currentList.findIndex(ex => arePostsIdentical(ex, recoveredPost));
+            if (matchIdx !== -1) {
+              const existingPost = currentList[matchIdx];
+              const existingMs = getPostTimestampMs(existingPost.updatedAt || existingPost.createdAt);
+              if (updMs > existingMs && computePostCloudSignature(existingPost) !== computePostCloudSignature(recoveredPost)) {
+                const mergedSingle = deduplicatePosts([recoveredPost, existingPost])[0];
+                if (mergedSingle) {
+                  currentList[matchIdx] = mergedSingle;
+                  updatedExistingFromNewerAnchor = true;
+                }
+              }
+              const canonicalDocId = computeSafeCloudPostId(currentList[matchIdx]);
+              if (docId && canonicalDocId && docId.toLowerCase() !== canonicalDocId.toLowerCase()) {
+                duplicateCloudDocsToArchive.push({ docId, post: recoveredPost });
+              }
+              return;
+            }
+
+            // También evitar duplicados entre múltiples documentos huérfanos dentro de blog_posts
+            const dupInRecoveredIdx = recovered.findIndex(r => arePostsIdentical(r, recoveredPost));
+            if (dupInRecoveredIdx !== -1) {
+              const prevRec = recovered[dupInRecoveredIdx];
+              const mergedRec = deduplicatePosts([recoveredPost, prevRec])[0] || prevRec;
+              recovered[dupInRecoveredIdx] = mergedRec;
+              const keepDocId = computeSafeCloudPostId(mergedRec);
+              if (docId && keepDocId && docId.toLowerCase() !== keepDocId.toLowerCase()) {
+                duplicateCloudDocsToArchive.push({ docId, post: recoveredPost });
+              }
+              return;
+            }
+
+            lastSyncedPostSignatures.set(computeSafeCloudPostId(recoveredPost), computePostCloudSignature(recoveredPost));
+            recovered.push(recoveredPost);
+          });
+        }
+
+        if (duplicateCloudDocsToArchive.length > 0) {
+          await Promise.allSettled(
+            duplicateCloudDocsToArchive.map(({ docId, post }) =>
+              setDoc(doc(db, 'blog_posts', docId), buildCleanBlogPostDoc(post, docId, {
+                isArchived: true,
+                hidden: true,
+                archivedAt: serverTimestamp()
+              }))
+            )
+          );
+        }
+
+        const shouldHealCloudMain = Boolean(window.__cloudMainHadDuplicatePosts || recovered.length > 0 || updatedExistingFromNewerAnchor);
+        if (shouldHealCloudMain) {
+          window.__cloudMainHadDuplicatePosts = false;
           const merged = sortPostsNewestFirst(deduplicatePosts([...currentList, ...recovered])).slice(0, 500);
           window.postsData = merged;
           try {
             localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(merged));
             if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
-              BlutuVault.savePosts(merged);
+              BlutuVault.savePosts(merged, { allowPrune: true });
             }
           } catch (e) {}
           if (typeof window.applyAllSectionsChangesToDOM === 'function' && !window.isAdminMode) {
@@ -1735,7 +1837,7 @@ import {
           } else if (typeof window.reconcileAndMergePosts === 'function') {
             window.reconcileAndMergePosts(merged);
           }
-          // Sanar automáticamente el documento principal en Firestore para visitantes solo cuando faltaba algún blog
+          // Sanar automáticamente site_data/main en Firestore para todos los visitantes
           await persistSiteDataInRealtime(true, { allowAuthPopup: false, fromAutoFlush: true });
         }
       } catch (err) {
@@ -2037,12 +2139,15 @@ import {
         seedSyncedPostSignatures(initialSnapState.posts);
 
         const siteDocRef = doc(db, 'site_data', 'main');
-        window.__siteDataRealtimeUnsubscribe = onSnapshot(siteDocRef, (snap) => {
-          if (!snap.exists()) {
+
+        const handleIncomingSiteSnapshot = (snap) => {
+          if (!snap || !snap.exists()) {
             markRemoteSiteDataHydrated();
+            if (typeof window.checkPendingSharedDeepLink === 'function') {
+              window.checkPendingSharedDeepLink();
+            }
             return;
           }
-          markRemoteSiteDataHydrated();
 
           const data = snap.data();
           const buzonOrMuro = data.muro || data.buzon;
@@ -2072,6 +2177,10 @@ import {
           }
           if (incomingContentSig === lastKnownSiteContentSig || incomingContentSig === lastLocalPersistedContentSig) {
             lastKnownSiteContentSig = incomingContentSig;
+            markRemoteSiteDataHydrated();
+            if (typeof window.checkPendingSharedDeepLink === 'function') {
+              window.checkPendingSharedDeepLink();
+            }
             return;
           }
           lastKnownSiteContentSig = incomingContentSig;
@@ -2080,9 +2189,13 @@ import {
           const hasUnsyncedSite = hasPendingCloudSyncChanges() || (Number(window.__pendingCloudSaveCount) || 0) > 0;
 
           if (data.posts && Array.isArray(data.posts) && data.posts.length > 0) {
+            const dedupedCloudOnly = deduplicatePosts(data.posts);
+            if (dedupedCloudOnly.length < data.posts.length) {
+              window.__cloudMainHadDuplicatePosts = true;
+            }
             const mergedIncoming = pendingLocalPosts.length > 0
-              ? deduplicatePosts([...pendingLocalPosts, ...data.posts])
-              : deduplicatePosts(data.posts);
+              ? deduplicatePosts([...pendingLocalPosts, ...dedupedCloudOnly])
+              : dedupedCloudOnly;
             const nextIncomingQuickSig = computePostsQuickSignature(mergedIncoming);
             window.postsData = mergedIncoming;
             if (nextIncomingQuickSig !== lastSavedLocalPostsQuickSig) {
@@ -2090,9 +2203,18 @@ import {
               try {
                 localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(mergedIncoming));
                 if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
-                  BlutuVault.savePosts(mergedIncoming);
+                  BlutuVault.savePosts(mergedIncoming, { allowPrune: true });
                 }
               } catch (e) {}
+            }
+            if (window.__cloudMainHadDuplicatePosts && auth && auth.currentUser && !window.isAdminMode) {
+              const adminEmail = (auth.currentUser.email || '').toLowerCase();
+              if (ADMIN_EMAILS.includes(adminEmail)) {
+                window.__cloudMainHadDuplicatePosts = false;
+                setTimeout(() => {
+                  persistSiteDataInRealtime(true, { allowAuthPopup: false, fromAutoFlush: true });
+                }, 400);
+              }
             }
           }
 
@@ -2172,6 +2294,8 @@ import {
             } catch (e) {}
           }
 
+          markRemoteSiteDataHydrated();
+
           const activeEl = document.activeElement;
           const isAnyAdminModalOpen = typeof window.isAdminMode !== 'undefined' && window.isAdminMode && (
             document.getElementById('blogReadModal')?.style.display === 'flex' ||
@@ -2187,11 +2311,26 @@ import {
           if (!isTyping && typeof window.checkPendingSharedDeepLink === 'function') {
             window.checkPendingSharedDeepLink();
           }
+        };
+
+        // Si se abrió mediante un enlace compartido directo, pedir de inmediato la versión fresca al servidor sin depender de caché intermedia
+        if (window.__hasInitialDeepLinkPending) {
+          getDocFromServer(siteDocRef)
+            .then((freshSnap) => {
+              handleIncomingSiteSnapshot(freshSnap);
+            })
+            .catch(() => {});
+        }
+
+        window.__siteDataRealtimeUnsubscribe = onSnapshot(siteDocRef, (snap) => {
+          handleIncomingSiteSnapshot(snap);
         }, (err) => {
           console.warn('Realtime sync listener notice:', err);
+          markRemoteSiteDataHydrated();
         });
       } catch (e) {
         console.error('Error iniciando escucha en tiempo real de datos del sitio:', e);
+        markRemoteSiteDataHydrated();
       }
     }
 
