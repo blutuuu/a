@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="blutu-build-timestamp" content="1793124000000">
+  <meta name="blutu-build-timestamp" content="1793128000000">
 
   <!-- CONTROL DE CACHÉ ESTRICTO PARA NAVEGADORES INTEGRADOS (INSTAGRAM, FACEBOOK, WEBVIEW) -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
@@ -41,10 +41,10 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
   <!-- Hojas de estilo modulares de Blutu -->
-  <link rel="stylesheet" href="./styles/core.css?v=1793124000000">
-  <link rel="stylesheet" href="./styles/blog-comments.css?v=1793124000000">
-  <link rel="stylesheet" href="./styles/galleries-admin.css?v=1793124000000">
-  <link rel="stylesheet" href="./styles/merch-games.css?v=1793124000000" id="blutuMerchGamesStylesheet">
+  <link rel="stylesheet" href="./styles/core.css?v=1793128000000">
+  <link rel="stylesheet" href="./styles/blog-comments.css?v=1793128000000">
+  <link rel="stylesheet" href="./styles/galleries-admin.css?v=1793128000000">
+  <link rel="stylesheet" href="./styles/merch-games.css?v=1793128000000" id="blutuMerchGamesStylesheet">
 
   <!-- Datos estructurados Schema.org -->
   <script type="application/ld+json">
@@ -241,6 +241,10 @@
                 <button type="button" id="btnDeleteCurrentGallery" class="wysiwyg-tool-btn is-danger" onclick="deleteCurrentGallery()" title="Eliminar la galería activa" style="padding: 3px 8px; font-size: 0.76rem;">🗑️ Galería</button>
               </div>
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <label title="Si está activo, extrae una única vez el color de aura de cada foto al subirla; desmárcalo para subir sin aura propia" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--accent-light); cursor: pointer; padding: 4px 8px; border: 1px solid rgba(90, 116, 191, 0.35); border-radius: 5px; background: rgba(5, 5, 8, 0.55); user-select: none;">
+                  <input type="checkbox" id="inlineGalleryAutoAuraCheckbox" checked style="width: 14px; height: 14px; accent-color: var(--accent-blue); cursor: pointer; margin: 0;">
+                  <span>✨ Aura al subir</span>
+                </label>
                 <input type="file" id="galleryPhotoFileInput" accept="image/*" multiple style="display: none;" onchange="handlePhotoFileUpload(event)">
                 <button type="button" class="wysiwyg-tool-btn" onclick="document.getElementById('galleryPhotoFileInput').click()" title="Subir fotos desde tu dispositivo" style="padding: 5px 11px; font-size: 0.78rem;">📤 Subir Fotos</button>
                 <button type="button" class="read-more-btn" onclick="openGalleryMediaModal('add')" title="Añadir foto o video de YouTube / Shorts por enlace" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
@@ -502,6 +506,6 @@
     <p><span id="adminTrigger" style="user-select: none;">© Blutu. 20XX</span></p>
   </footer>
 
-  <script type="module" src="./js/main.js?v=1793124000000"></script>
+  <script type="module" src="./js/main.js?v=1793128000000"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* Blutu — Datos Iniciales por Defecto y Esquemas de Juegos */
-export const BLUTU_BUILD_TIMESTAMP = 1793124000000;
+export const BLUTU_BUILD_TIMESTAMP = 1793128000000;
 
     /* BASE DE DATOS DE PUBLICACIONES DE BLOG */
     export const DEFAULT_POSTS_DATA = [
@@ -307,7 +307,9 @@ export function cloneSiteDefault(val) {
           vsPcEasyBtnColor: '#4b67b3',
           vsPcHardBtnColor: '#2b3e78',
           retryBtnColor: '#4a63ab',
-          backBtnColor: '#1f2b4d'
+          backBtnColor: '#1f2b4d',
+          userTurnColor: '#3b66d4',
+          pcTurnColor: '#b83252'
         },
         sixBySix: {
           easyBtnColor: '#5a74bf',
@@ -371,6 +373,8 @@ export function cloneSiteDefault(val) {
         if (typeof raw.memorama.vsPcHardBtnColor === 'string' && raw.memorama.vsPcHardBtnColor.trim()) base.memorama.vsPcHardBtnColor = raw.memorama.vsPcHardBtnColor.trim();
         if (typeof raw.memorama.retryBtnColor === 'string' && raw.memorama.retryBtnColor.trim()) base.memorama.retryBtnColor = raw.memorama.retryBtnColor.trim();
         if (typeof raw.memorama.backBtnColor === 'string' && raw.memorama.backBtnColor.trim()) base.memorama.backBtnColor = raw.memorama.backBtnColor.trim();
+        if (typeof raw.memorama.userTurnColor === 'string' && raw.memorama.userTurnColor.trim()) base.memorama.userTurnColor = raw.memorama.userTurnColor.trim();
+        if (typeof raw.memorama.pcTurnColor === 'string' && raw.memorama.pcTurnColor.trim()) base.memorama.pcTurnColor = raw.memorama.pcTurnColor.trim();
       }
 
       if (raw.sixBySix && typeof raw.sixBySix === 'object') {

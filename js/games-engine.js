@@ -44,6 +44,97 @@ function buildMiniGameMuteButtonHTML(btnId) {
   return `<button type="button" id="${escapeAttr(btnId)}" class="minigame-mute-btn${muted ? ' is-muted' : ''}" aria-label="${escapeAttr(label)}" aria-pressed="${muted ? 'true' : 'false'}" title="${escapeAttr(label)}" onclick="event.stopPropagation(); toggleSharedGameMute();">${icon}</button>`;
 }
 
+const VSPC_TURN_CSS_VARS = [
+  "--vspc-win-bg",
+  "--vspc-win-border",
+  "--vspc-win-glow",
+  "--vspc-win-inner-glow",
+  "--vspc-turn-hud-bg",
+  "--vspc-turn-hud-border",
+  "--vspc-turn-accent",
+  "--vspc-card-back-border",
+  "--vspc-card-emblem"
+];
+
+function parseHexToRgb(hexStr, fallback) {
+  const clean = String(hexStr || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(clean)) {
+    return {
+      r: parseInt(clean.slice(0, 2), 16),
+      g: parseInt(clean.slice(2, 4), 16),
+      b: parseInt(clean.slice(4, 6), 16)
+    };
+  }
+  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16),
+      g: parseInt(clean[1] + clean[1], 16),
+      b: parseInt(clean[2] + clean[2], 16)
+    };
+  }
+  return fallback;
+}
+
+function buildVsPcTurnThemeVars(hexColor, fallbackRgb) {
+  const { r, g, b } = parseHexToRgb(hexColor, fallbackRgb);
+  const bgR = Math.round(8 * 0.68 + r * 0.32);
+  const bgG = Math.round(10 * 0.68 + g * 0.32);
+  const bgB = Math.round(16 * 0.68 + b * 0.32);
+
+  const hudR = Math.round(5 * 0.74 + r * 0.26);
+  const hudG = Math.round(7 * 0.74 + g * 0.26);
+  const hudB = Math.round(12 * 0.74 + b * 0.26);
+
+  const borderR = Math.min(255, Math.round(r + (255 - r) * 0.42));
+  const borderG = Math.min(255, Math.round(g + (255 - g) * 0.42));
+  const borderB = Math.min(255, Math.round(b + (255 - b) * 0.42));
+
+  const accentR = Math.min(255, Math.round(r + (255 - r) * 0.62));
+  const accentG = Math.min(255, Math.round(g + (255 - g) * 0.62));
+  const accentB = Math.min(255, Math.round(b + (255 - b) * 0.62));
+
+  return {
+    "--vspc-win-bg": `rgb(${bgR}, ${bgG}, ${bgB})`,
+    "--vspc-win-border": `rgb(${borderR}, ${borderG}, ${borderB})`,
+    "--vspc-win-glow": `rgba(${r}, ${g}, ${b}, 0.54)`,
+    "--vspc-win-inner-glow": `rgba(${r}, ${g}, ${b}, 0.24)`,
+    "--vspc-turn-hud-bg": `rgba(${hudR}, ${hudG}, ${hudB}, 0.92)`,
+    "--vspc-turn-hud-border": `rgba(${borderR}, ${borderG}, ${borderB}, 0.66)`,
+    "--vspc-turn-accent": `rgb(${accentR}, ${accentG}, ${accentB})`,
+    "--vspc-card-back-border": `rgba(${borderR}, ${borderG}, ${borderB}, 0.5)`,
+    "--vspc-card-emblem": `rgba(${accentR}, ${accentG}, ${accentB}, 0.74)`
+  };
+}
+
+function clearMemoramaTurnWindowTheme() {
+  const modalBox = document.querySelector("#blogReadModal .blog-modal-box");
+  if (!modalBox) return;
+  modalBox.classList.remove("is-vspc-turn-active", "is-vspc-turn-user", "is-vspc-turn-pc");
+  for (let i = 0; i < VSPC_TURN_CSS_VARS.length; i++) {
+    modalBox.style.removeProperty(VSPC_TURN_CSS_VARS[i]);
+  }
+}
+
+function syncMemoramaTurnWindowTheme(game) {
+  const modalBox = document.querySelector("#blogReadModal .blog-modal-box");
+  if (!modalBox) return;
+  if (!game || game.destroyed || game.type !== "memorama" || game.mode === "solo") {
+    clearMemoramaTurnWindowTheme();
+    return;
+  }
+  const isUserTurn = game.turn === "user";
+  const vars = isUserTurn ? game.userTurnVars : game.pcTurnVars;
+  modalBox.classList.add("is-vspc-turn-active");
+  modalBox.classList.toggle("is-vspc-turn-user", isUserTurn);
+  modalBox.classList.toggle("is-vspc-turn-pc", !isUserTurn);
+  if (vars) {
+    for (let i = 0; i < VSPC_TURN_CSS_VARS.length; i++) {
+      const k = VSPC_TURN_CSS_VARS[i];
+      if (vars[k]) modalBox.style.setProperty(k, vars[k]);
+    }
+  }
+}
+
 export function destroyActiveMiniGame(keepAudioAlive = false) {
   if (activeMiniGame) {
     activeMiniGame.destroyed = true;
@@ -69,6 +160,7 @@ export function destroyActiveMiniGame(keepAudioAlive = false) {
     }
     setActiveMiniGame(null);
   }
+  clearMemoramaTurnWindowTheme();
   if (!keepAudioAlive) {
     stopAndDestroySharedGameMusic(false);
   }
@@ -194,6 +286,9 @@ function startMemoramaRuntime(mode) {
   const isVsPc = (mode === "vspc-easy" || mode === "vspc-hard" || mode === "vspc");
   const isVsPcEasy = (mode === "vspc-easy");
 
+  const userTurnHex = normHex(memCfg.userTurnColor || "#3b66d4") || "#3b66d4";
+  const pcTurnHex = normHex(memCfg.pcTurnColor || "#b83252") || "#b83252";
+
   const game = {
     type: "memorama",
     mode: isVsPc ? (isVsPcEasy ? "vspc-easy" : "vspc-hard") : "solo",
@@ -206,6 +301,8 @@ function startMemoramaRuntime(mode) {
     turn: "user",
     userPairs: 0,
     pcPairs: 0,
+    userTurnVars: isVsPc ? buildVsPcTurnThemeVars(userTurnHex, { r: 59, g: 102, b: 212 }) : null,
+    pcTurnVars: isVsPc ? buildVsPcTurnThemeVars(pcTurnHex, { r: 184, g: 50, b: 82 }) : null,
     seenMemory: new Map(),
     startTime: performance.now(),
     rafId: null,
@@ -282,6 +379,7 @@ function startMemoramaRuntime(mode) {
         </div>
       </div>
     `;
+    syncMemoramaTurnWindowTheme(game);
   }
 
   registerSharedMuteButton("minigameHudMuteBtn");
@@ -367,6 +465,7 @@ function updateMemoramaVsPcHud(game) {
   if (tEl) {
     tEl.textContent = game.turn === "user" ? "Tu turno" : "Turno de PC...";
   }
+  syncMemoramaTurnWindowTheme(game);
 }
 
 export function handleMemoramaCardTap(idx) {

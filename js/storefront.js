@@ -28,9 +28,15 @@ import {
   setDeletedPostIds,
   markPostIdsDeleted,
   unmarkPostIdDeleted,
+  unmarkPostDeleted,
   isDeletedPost,
   deduplicatePosts,
-  computePostsQuickSignature
+  computePostsQuickSignature,
+  markPostsPendingCloudSync,
+  removePostPendingCloudSync,
+  clearAllPendingCloudSync,
+  getPendingCloudSyncPosts,
+  flushPendingCloudSyncQueueToStorage
 } from "./vault.js";
 
 var isAdminMode = false;
@@ -108,12 +114,13 @@ initMobileAppDeepLinks();
         ? window.postsData 
         : postsData;
 
+      const pendingUnsynced = getPendingCloudSyncPosts();
       const cleanCurrent = deduplicatePosts(current);
       const cleanIncoming = deduplicatePosts(incomingPosts);
       const prevSig = computePostsQuickSignature(cleanCurrent);
 
-      // Fusión priorizando la versión entrante (bóveda o cloud)
-      const merged = deduplicatePosts([...cleanIncoming, ...cleanCurrent])
+      // Fusión priorizando primero cambios locales pendientes de nube, luego bóveda/cloud entrante, luego memoria
+      const merged = deduplicatePosts([...pendingUnsynced, ...cleanIncoming, ...cleanCurrent])
         .sort((a, b) => new Date(b.dateIso || 0) - new Date(a.dateIso || 0));
       const nextSig = computePostsQuickSignature(merged);
 
@@ -215,22 +222,26 @@ initMobileAppDeepLinks();
         }
       }
 
-      // Cargar también desde la bóveda permanente de publicaciones sanitizada
+      // Cargar también desde la bóveda permanente de publicaciones sanitizada + cola pendiente de nube
       const permVault = localStorage.getItem('blutu_permanent_posts_vault');
+      const pendingBootPosts = getPendingCloudSyncPosts();
+      let vaultList = [];
       if (permVault) {
         const parsedVault = JSON.parse(permVault);
         if (Array.isArray(parsedVault) && parsedVault.length > 0) {
-          const cleanVault = deduplicatePosts(parsedVault);
-          postsData = deduplicatePosts([...cleanVault, ...postsData])
-            .sort((a, b) => new Date(b.dateIso || 0) - new Date(a.dateIso || 0));
+          vaultList = deduplicatePosts(parsedVault);
         }
+      }
+      if (pendingBootPosts.length > 0 || vaultList.length > 0) {
+        postsData = deduplicatePosts([...pendingBootPosts, ...vaultList, ...postsData])
+          .sort((a, b) => new Date(b.dateIso || 0) - new Date(a.dateIso || 0));
       }
     } catch (e) {
       console.warn('Error reading blutu_live_site_data cache:', e);
     }
 
     // Asegurar que postsData en memoria esté 100% libre de duplicados
-    postsData = deduplicatePosts(postsData);
+    postsData = deduplicatePosts([...getPendingCloudSyncPosts(), ...postsData]);
     window.postsData = postsData;
 
     // Cargar de forma resiliente desde IndexedDB BlutuVault saneado
@@ -1025,7 +1036,7 @@ try {
           <button type="button" class="is-remove" onmousedown="event.preventDefault()" onclick="removeInlineFigureBlock(this)" title="Quitar imagen">🗑️</button>
         </div>
         <img src="${safeUrl}" class="inline-img" ${auraAttr} alt="${escapeHtmlAttr(caption || 'Imagen en contenido')}">
-        <figcaption class="inline-img-caption" contenteditable="true" spellcheck="true" data-placeholder="Pie de foto (opcional)..." oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${escapeHtmlText(caption || '')}</figcaption>
+        <figcaption class="inline-img-caption" contenteditable="true" spellcheck="true" data-placeholder="Pie de foto (opcional)..." oninput="scheduleLiveBlogModalSync()" onpaste="handlePlainTextPaste(event)" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${escapeHtmlText(caption || '')}</figcaption>
       </figure>`;
     }
 
@@ -1131,7 +1142,7 @@ try {
               <button type="button" class="is-remove" onmousedown="event.preventDefault()" onclick="removeLiveCoverImage()" title="Quitar imagen de portada">🗑️ Quitar</button>
             </div>
             <img src="${escapeHtmlAttr(post.image)}" id="blogLiveMainImg" class="main-img" ${auraAttr} alt="${escapeHtmlAttr(post.title || 'Portada')}">
-            <figcaption id="blogLiveMainCaption" class="main-img-caption" contenteditable="true" spellcheck="true" data-placeholder="Añadir pie de foto..." oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${escapeHtmlText(post.imageCaption || '')}</figcaption>
+            <figcaption id="blogLiveMainCaption" class="main-img-caption" contenteditable="true" spellcheck="true" data-placeholder="Añadir pie de foto..." oninput="scheduleLiveBlogModalSync()" onpaste="handlePlainTextPaste(event)" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${escapeHtmlText(post.imageCaption || '')}</figcaption>
           </figure>
         `;
       }
@@ -1149,35 +1160,17 @@ try {
       const blogImgs = containerEl.querySelectorAll('img.main-img, img.inline-img');
       blogImgs.forEach(img => {
         img.style.transition = 'box-shadow 0.5s ease, border-color 0.5s ease, filter 0.5s ease';
-        const customAura = img.getAttribute('data-aura') || (img.classList.contains('main-img') && post && post.imageAura ? post.imageAura : null);
+        const rawAura = img.getAttribute('data-aura') || (img.classList.contains('main-img') && post && post.imageAura ? post.imageAura : '');
+        const customAura = rawAura ? String(rawAura).trim() : '';
 
-        const applyAuraStyle = (auraColor) => {
-          if (!auraColor) return;
-          const softGlow = auraColor.replace(/rgba?\(([^)]+)\)/, (m, p) => {
-            const parts = p.split(',').map(s => s.trim());
-            if (parts.length >= 3) {
-              return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, 0.35)`;
-            }
-            return auraColor;
-          });
-          img.style.borderColor = auraColor;
-          img.style.boxShadow = `inset 0 0 12px rgba(0, 0, 0, 0.85), 0 0 20px ${auraColor}, 0 0 42px ${softGlow}, 0 8px 30px rgba(0, 0, 0, 0.95)`;
-        };
-
-        if (customAura && customAura.trim() !== '') {
-          applyAuraStyle(customAura.trim());
+        if (customAura && customAura.toLowerCase() !== 'none') {
+          const solidGlow = formatSavedAuraGlow(customAura, 0.88) || customAura;
+          const softGlow = formatSavedAuraGlow(customAura, 0.35) || customAura;
+          img.style.borderColor = solidGlow;
+          img.style.boxShadow = `inset 0 0 12px rgba(0, 0, 0, 0.85), 0 0 20px ${solidGlow}, 0 0 42px ${softGlow}, 0 8px 30px rgba(0, 0, 0, 0.95)`;
         } else {
           img.style.borderColor = '';
           img.style.boxShadow = '';
-          const updateImageAura = () => {
-            extractImageDominantColor(img, function(color) {
-              if (color) applyAuraStyle(color);
-            });
-          };
-          updateImageAura();
-          if (!img.complete) {
-            img.addEventListener('load', updateImageAura, { once: true });
-          }
         }
       });
     }
@@ -1521,6 +1514,22 @@ try {
       return null;
     }
 
+    function formatSavedAuraGlow(rawColor, alpha = 0.88) {
+      if (!rawColor || typeof rawColor !== 'string') return '';
+      const trimmed = rawColor.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'none') return '';
+      const rgb = parseCssColorToRgb(trimmed);
+      if (!rgb) return trimmed;
+      return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+    }
+
+    function rgbOrCssToHexUpper(rawColor) {
+      const rgb = parseCssColorToRgb(rawColor);
+      if (!rgb) return '';
+      const toHex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+      return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`.toUpperCase();
+    }
+
     function rgbToHslObj(r, g, b) {
       const rn = r / 255;
       const gn = g / 255;
@@ -1676,46 +1685,16 @@ try {
     }
     window.getActiveEditableBlogPost = getActiveEditableBlogPost;
 
-    function applyBlogModalAdaptiveTheme(post, modalBody) {
+    function applyBlogModalAdaptiveTheme(post, _modalBody) {
       resetBlogModalAdaptiveTheme();
       if (!post) return;
 
       const explicitAura = (post.imageAura && String(post.imageAura).trim()) ? String(post.imageAura).trim() : '';
-      if (explicitAura) {
+      if (explicitAura && explicitAura.toLowerCase() !== 'none') {
         const auraTheme = computeAccessibleBlogThemeFromColor(explicitAura);
         if (auraTheme) {
           applyComputedThemeVarsToBlogModal(auraTheme);
-          return;
         }
-      }
-
-      if (!(post.image && String(post.image).trim())) return;
-
-      const capturedPost = post;
-      const mainImg = modalBody ? modalBody.querySelector('img.main-img') : null;
-
-      if (mainImg) {
-        const applyFromImg = () => {
-          extractImageDominantColor(mainImg, (sampledColor) => {
-            if (getActiveEditableBlogPost() !== capturedPost) return;
-            if (sampledColor) {
-              applyComputedThemeVarsToBlogModal(computeAccessibleBlogThemeFromColor(sampledColor));
-            }
-          });
-        };
-        applyFromImg();
-        if (!mainImg.complete) {
-          mainImg.addEventListener('load', applyFromImg, { once: true });
-        }
-      } else {
-        const tempProbe = new Image();
-        tempProbe.src = post.image.trim();
-        extractImageDominantColor(tempProbe, (sampledColor) => {
-          if (getActiveEditableBlogPost() !== capturedPost) return;
-          if (sampledColor) {
-            applyComputedThemeVarsToBlogModal(computeAccessibleBlogThemeFromColor(sampledColor));
-          }
-        });
       }
     }
     window.applyBlogModalAdaptiveTheme = applyBlogModalAdaptiveTheme;
@@ -1762,7 +1741,7 @@ try {
             </div>
           </div>
 
-          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del pensamiento..." oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
+          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del pensamiento..." oninput="scheduleLiveBlogModalSync()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
 
           <div style="text-align: center; margin-bottom: 22px;">
             <span class="modal-date modal-date-editable" style="margin-bottom: 0;" title="Haz clic para cambiar la fecha">
@@ -2233,11 +2212,8 @@ try {
         const cachedRaw = localStorage.getItem('blutu_live_site_data');
         const parsed = cachedRaw ? JSON.parse(cachedRaw) : {};
         parsed.buzon = {
-          ...(parsed.buzon || {}),
           isVisible: isBuzonSectionVisible,
-          gamesVisible: isGamesSectionVisible,
-          hiddenCommentIds: hiddenCommentIds,
-          gamesData: gamesData
+          gamesVisible: isGamesSectionVisible
         };
         parsed.muro = {
           ...(parsed.muro || {}),
@@ -2260,7 +2236,7 @@ try {
       pendingGamesLocalCacheTimer = setTimeout(() => {
         pendingGamesLocalCacheTimer = null;
         persistGamesLocalCache();
-      }, 240);
+      }, 850);
     }
 
     function computeGameButtonStyleAttr(rawColor) {
@@ -2453,6 +2429,8 @@ try {
         const vsPcHardHex = normalizeCssColorToHex(mem.vsPcHardBtnColor || '#2b3e78') || '#2b3e78';
         const retryHex = normalizeCssColorToHex(mem.retryBtnColor || '#4a63ab') || '#4a63ab';
         const backHex = normalizeCssColorToHex(mem.backBtnColor || '#1f2b4d') || '#1f2b4d';
+        const userTurnHex = normalizeCssColorToHex(mem.userTurnColor || '#3b66d4') || '#3b66d4';
+        const pcTurnHex = normalizeCssColorToHex(mem.pcTurnColor || '#b83252') || '#b83252';
 
         let adminPanelHTML = '';
         if (inAdminEditor) {
@@ -2526,6 +2504,18 @@ try {
                 <label class="game-admin-color-item">
                   <span>Volver</span>
                   <input type="color" value="${escapeHtmlAttr(backHex)}" oninput="updateGameButtonColorLive('memorama', 'backBtnColor', this.value)">
+                </label>
+              </div>
+
+              <h4 class="game-admin-config-title" style="margin-top:14px;">🪟 Color de Ventana por Turno (Vs PC)</h4>
+              <div class="game-admin-colors-grid">
+                <label class="game-admin-color-item">
+                  <span>Tu turno</span>
+                  <input type="color" value="${escapeHtmlAttr(userTurnHex)}" oninput="updateGameButtonColorLive('memorama', 'userTurnColor', this.value)">
+                </label>
+                <label class="game-admin-color-item">
+                  <span>Turno PC</span>
+                  <input type="color" value="${escapeHtmlAttr(pcTurnHex)}" oninput="updateGameButtonColorLive('memorama', 'pcTurnColor', this.value)">
                 </label>
               </div>
             </div>
@@ -2643,7 +2633,7 @@ try {
             </div>
           </div>
 
-          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del blog..." style="margin-bottom:18px;" oninput="syncLiveBlogModalToMemory()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
+          <h1 id="blogLiveTitle" contenteditable="true" spellcheck="true" data-placeholder="Título del blog..." style="margin-bottom:18px;" oninput="scheduleLiveBlogModalSync()" onpaste="handlePlainTextPaste(event)" onkeydown="handleLiveBlogTitleKeydown(event)">${escapeHtmlText(post.title || '')}</h1>
 
           <div id="blogLiveCoverContainer">
             ${renderLiveCoverSectionHTML(post)}
@@ -2827,6 +2817,9 @@ try {
             canvas.height = h;
             const ctx = canvas.getContext('2d');
             if (!ctx) {
+              canvas.width = 0;
+              canvas.height = 0;
+              img.src = '';
               resolve(ev.target.result);
               return;
             }
@@ -2842,9 +2835,81 @@ try {
             } catch (err) {
               out = canvas.toDataURL('image/jpeg', quality);
             }
+            // Liberar inmediatamente textura GPU en navegadores móviles
+            canvas.width = 0;
+            canvas.height = 0;
+            img.onload = null;
+            img.onerror = null;
+            img.src = '';
             resolve(out);
           };
           img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function compressUploadedImageFileToDataUrl(file, maxDim = 1150, quality = 0.80) {
+      return new Promise((resolve, reject) => {
+        if (!file) {
+          reject(new Error('No file'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('File read error'));
+        reader.onload = (ev) => {
+          const rawDataUrl = ev.target && ev.target.result ? String(ev.target.result) : '';
+          if (!rawDataUrl) {
+            reject(new Error('Empty file'));
+            return;
+          }
+          // Conservar GIFs animados pequeños tal cual
+          if (file.type === 'image/gif' && file.size <= 300 * 1024) {
+            resolve(rawDataUrl);
+            return;
+          }
+          const img = new Image();
+          img.onerror = () => resolve(rawDataUrl);
+          img.onload = () => {
+            const natW = img.naturalWidth || img.width || maxDim;
+            const natH = img.naturalHeight || img.height || maxDim;
+            const renderScaled = (targetMaxDim, targetQual) => {
+              const scale = Math.min(1, targetMaxDim / Math.max(natW, natH));
+              const w = Math.max(1, Math.round(natW * scale));
+              const h = Math.max(1, Math.round(natH * scale));
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              try {
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return rawDataUrl;
+                ctx.clearRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0, w, h);
+                try {
+                  const webp = canvas.toDataURL('image/webp', targetQual);
+                  if (webp && webp.startsWith('data:image/webp')) return webp;
+                } catch (e) {}
+                return canvas.toDataURL('image/jpeg', targetQual);
+              } finally {
+                canvas.width = 0;
+                canvas.height = 0;
+              }
+            };
+
+            let out = renderScaled(maxDim, quality);
+            // Si aún supera ~160 KB en Base64, reducir un escalón para proteger la cuota de 1 MiB de Firestore
+            if (out.length > 220000) {
+              out = renderScaled(880, 0.70);
+            }
+            if (out.length > 220000) {
+              out = renderScaled(680, 0.64);
+            }
+            img.onload = null;
+            img.onerror = null;
+            img.src = '';
+            resolve(out);
+          };
+          img.src = rawDataUrl;
         };
         reader.readAsDataURL(file);
       });
@@ -2946,7 +3011,7 @@ try {
       pendingGalleryCacheTimer = setTimeout(() => {
         pendingGalleryCacheTimer = null;
         persistGalleryLocalCache();
-      }, 280);
+      }, 850);
     }
 
     function escapeHtmlAttr(str) {
@@ -3447,53 +3512,59 @@ try {
       }
     }
 
-    const dominantColorCache = new Map();
-    const pendingDominantColorCallbacks = new Map();
+    /* EXTRACCIÓN ÚNICA DE COLOR DE AURA EXCLUSIVA PARA MODO EDICIÓN (CERO ESCANEO EN VIVO PARA VISITANTES) */
+    const adminSingleScanAuraCache = new Map();
+    const adminPendingAuraScans = new Map();
 
-    function sampleAverageAuraFromDrawable(drawable) {
-      // Usar un canvas limpio de 24x24 por lectura evita que una imagen sin CORS contamine lecturas posteriores
+    function sampleAverageAuraHexFromDrawable(drawable) {
       const canvas = document.createElement('canvas');
       canvas.width = 24;
       canvas.height = 24;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return null;
+      try {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return '';
 
-      ctx.drawImage(drawable, 0, 0, 24, 24);
-      const data = ctx.getImageData(0, 0, 24, 24).data;
+        ctx.drawImage(drawable, 0, 0, 24, 24);
+        const data = ctx.getImageData(0, 0, 24, 24).data;
 
-      let r = 0, g = 0, b = 0, count = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const alpha = data[i + 3];
-        if (alpha < 30) continue;
-        const pr = data[i];
-        const pg = data[i + 1];
-        const pb = data[i + 2];
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const alpha = data[i + 3];
+          if (alpha < 30) continue;
+          const pr = data[i];
+          const pg = data[i + 1];
+          const pb = data[i + 2];
 
-        const brightness = (pr + pg + pb) / 3;
-        if (brightness < 12 && count > 5) continue;
+          const brightness = (pr + pg + pb) / 3;
+          if (brightness < 12 && count > 5) continue;
 
-        r += pr;
-        g += pg;
-        b += pb;
-        count++;
-      }
-
-      if (count > 0) {
-        r = Math.round(r / count);
-        g = Math.round(g / count);
-        b = Math.round(b / count);
-
-        const max = Math.max(r, g, b);
-        if (max < 110) {
-          const boost = 110 - max;
-          r = Math.min(255, r + boost);
-          g = Math.min(255, g + boost);
-          b = Math.min(255, b + boost);
+          r += pr;
+          g += pg;
+          b += pb;
+          count++;
         }
 
-        return `rgba(${r}, ${g}, ${b}, 0.88)`;
+        if (count > 0) {
+          r = Math.round(r / count);
+          g = Math.round(g / count);
+          b = Math.round(b / count);
+
+          const max = Math.max(r, g, b);
+          if (max < 110) {
+            const boost = 110 - max;
+            r = Math.min(255, r + boost);
+            g = Math.min(255, g + boost);
+            b = Math.min(255, b + boost);
+          }
+
+          const toHex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+          return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+        }
+        return '';
+      } finally {
+        canvas.width = 0;
+        canvas.height = 0;
       }
-      return null;
     }
 
     function isSameOriginOrLocalMedia(urlStr) {
@@ -3508,38 +3579,7 @@ try {
       }
     }
 
-    async function sampleAuraFromBlob(blob) {
-      if (!blob || blob.size === 0 || (blob.type && /^text\/html/i.test(blob.type))) return null;
-      if (typeof createImageBitmap === 'function') {
-        try {
-          const bmp = await createImageBitmap(blob);
-          try {
-            return sampleAverageAuraFromDrawable(bmp);
-          } finally {
-            if (bmp && typeof bmp.close === 'function') bmp.close();
-          }
-        } catch (bmpErr) {}
-      }
-      return new Promise((resolve) => {
-        const objUrl = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          let sampled = null;
-          try {
-            sampled = sampleAverageAuraFromDrawable(img);
-          } catch (e) {}
-          URL.revokeObjectURL(objUrl);
-          resolve(sampled);
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(objUrl);
-          resolve(null);
-        };
-        img.src = objUrl;
-      });
-    }
-
-    function sampleAuraViaCorsImage(targetUrl, timeoutMs = 5500) {
+    function sampleAuraHexViaCorsImage(targetUrl, timeoutMs = 4500) {
       return new Promise((resolve) => {
         const tempImg = new Image();
         let done = false;
@@ -3548,7 +3588,8 @@ try {
           done = true;
           tempImg.onload = null;
           tempImg.onerror = null;
-          resolve(null);
+          tempImg.src = '';
+          resolve('');
         }, timeoutMs);
 
         if (!isSameOriginOrLocalMedia(targetUrl)) {
@@ -3560,118 +3601,89 @@ try {
           if (done) return;
           done = true;
           clearTimeout(timer);
+          let hex = '';
           try {
-            resolve(sampleAverageAuraFromDrawable(tempImg));
+            hex = sampleAverageAuraHexFromDrawable(tempImg);
           } catch (e) {
-            resolve(null);
+            hex = '';
           }
+          tempImg.onload = null;
+          tempImg.onerror = null;
+          tempImg.src = '';
+          resolve(hex);
         };
 
         tempImg.onerror = () => {
           if (done) return;
           done = true;
           clearTimeout(timer);
-          resolve(null);
+          tempImg.onload = null;
+          tempImg.onerror = null;
+          tempImg.src = '';
+          resolve('');
         };
 
         tempImg.src = targetUrl;
       });
     }
 
-    async function computeUntaintedAuraForUrl(src) {
-      // 1. Misma procedencia / data: / blob:
+    async function computeUntaintedAuraHexOnce(src) {
+      if (!src) return '';
       if (isSameOriginOrLocalMedia(src)) {
-        return await sampleAuraViaCorsImage(src, 5000);
+        return await sampleAuraHexViaCorsImage(src, 4000);
       }
+      const directHex = await sampleAuraHexViaCorsImage(src, 3800);
+      if (directHex) return directHex;
 
-      // 2. Fetch CORS limpio con cache: 'no-store' para evitar colisión con la caché no-CORS del <img> visible
-      try {
-        const controller = ('AbortController' in window) ? new AbortController() : null;
-        const timer = setTimeout(() => { if (controller) controller.abort(); }, 6000);
-        try {
-          const resp = await fetch(src, {
-            mode: 'cors',
-            credentials: 'omit',
-            cache: 'no-store',
-            referrerPolicy: 'no-referrer',
-            signal: controller ? controller.signal : undefined
-          });
-          if (resp.ok) {
-            const blob = await resp.blob();
-            const color = await sampleAuraFromBlob(blob);
-            if (color) return color;
-          }
-        } finally {
-          clearTimeout(timer);
-        }
-      } catch (fetchErr) {}
-
-      // 3. Carga mediante Image anónima (con parámetro anticaché si no es URL firmada)
-      const isSignedUrl = /(?:token=|Signature=|X-Amz-Signature=|GoogleAccessId=)/i.test(src);
-      const bustSrc = isSignedUrl ? src : `${src}${src.includes('?') ? '&' : '?'}_aura=1`;
-      const directImgColor = await sampleAuraViaCorsImage(bustSrc, 5500);
-      if (directImgColor) return directImgColor;
-
-      // 4. Miniatura CORS ligera (32x32) para servidores externos sin cabecera Access-Control-Allow-Origin
-      const cleanNoProto = src.replace(/^https?:\/\//i, '');
-      const proxyThumbs = [
-        `https://wsrv.nl/?url=${encodeURIComponent(src)}&w=32&h=32&output=png`,
-        `https://wsrv.nl/?url=${encodeURIComponent(cleanNoProto)}&w=32&h=32&output=png`,
-        `https://corsproxy.io/?${encodeURIComponent(src)}`
-      ];
-
-      for (const proxyUrl of proxyThumbs) {
-        const proxyColor = await sampleAuraViaCorsImage(proxyUrl, 6000);
-        if (proxyColor) return proxyColor;
-      }
-
-      return null;
+      const proxyThumbUrl = `https://wsrv.nl/?url=${encodeURIComponent(src)}&w=24&h=24&output=jpg`;
+      return await sampleAuraHexViaCorsImage(proxyThumbUrl, 4500);
     }
 
-    function extractImageDominantColor(imgEl, callback) {
-      if (!imgEl || typeof callback !== 'function') return;
-      const src = (imgEl.currentSrc || imgEl.src || imgEl.getAttribute('src') || '').trim();
-      if (!src) return;
-
-      if (dominantColorCache.has(src)) {
-        callback(dominantColorCache.get(src));
-        return;
+    async function extractAuraHexOnceForAdmin(rawSrc, forceRefresh = false) {
+      if (typeof isAdminMode === 'undefined' || !isAdminMode) return '';
+      if (!rawSrc || typeof rawSrc !== 'string') return '';
+      let trimmed = rawSrc.trim();
+      if (!trimmed) return '';
+      if (!/^(https?:\/\/|data:|blob:|\/)/i.test(trimmed)) {
+        if (!trimmed.includes('.') || trimmed.length < 5) return '';
+        trimmed = 'https://' + trimmed;
       }
 
-      // Solo leer directamente del <img> si es local/data/blob o ya fue cargado explícitamente con CORS
-      if (imgEl.complete && imgEl.naturalWidth > 0 && (isSameOriginOrLocalMedia(src) || Boolean(imgEl.crossOrigin))) {
+      const cleaned = cleanOrTransformMediaUrl(trimmed);
+      const ytInfo = parseYouTubeUrl(cleaned);
+      const cacheKey = ytInfo ? `yt:${ytInfo.videoId}` : cleaned;
+
+      if (!forceRefresh && adminSingleScanAuraCache.has(cacheKey)) {
+        return adminSingleScanAuraCache.get(cacheKey) || '';
+      }
+
+      if (!forceRefresh && adminPendingAuraScans.has(cacheKey)) {
+        return await adminPendingAuraScans.get(cacheKey);
+      }
+
+      const scanPromise = (async () => {
         try {
-          const directColor = sampleAverageAuraFromDrawable(imgEl);
-          if (directColor) {
-            dominantColorCache.set(src, directColor);
-            callback(directColor);
-            return;
+          let hex = '';
+          if (ytInfo) {
+            hex = await computeUntaintedAuraHexOnce(ytInfo.thumbnailUrl);
+            if (!hex) {
+              hex = await computeUntaintedAuraHexOnce(`https://i.ytimg.com/vi/${ytInfo.videoId}/hqdefault.jpg`);
+            }
+          } else {
+            hex = await computeUntaintedAuraHexOnce(cleaned);
           }
-        } catch (directErr) {}
-      }
-
-      if (pendingDominantColorCallbacks.has(src)) {
-        pendingDominantColorCallbacks.get(src).push(callback);
-        return;
-      }
-      pendingDominantColorCallbacks.set(src, [callback]);
-
-      computeUntaintedAuraForUrl(src).then(colorValue => {
-        if (colorValue) {
-          dominantColorCache.set(src, colorValue);
+          adminSingleScanAuraCache.set(cacheKey, hex || '');
+          return hex || '';
+        } catch (e) {
+          adminSingleScanAuraCache.set(cacheKey, '');
+          return '';
+        } finally {
+          adminPendingAuraScans.delete(cacheKey);
         }
-        const waiters = pendingDominantColorCallbacks.get(src) || [];
-        pendingDominantColorCallbacks.delete(src);
-        waiters.forEach(fn => {
-          try { fn(colorValue); } catch (e) {}
-        });
-      }).catch(() => {
-        const waiters = pendingDominantColorCallbacks.get(src) || [];
-        pendingDominantColorCallbacks.delete(src);
-        waiters.forEach(fn => {
-          try { fn(null); } catch (e) {}
-        });
-      });
+      })();
+
+      adminPendingAuraScans.set(cacheKey, scanPromise);
+      return await scanPromise;
     }
 
     function calculateReadableTextColor(color1, color2) {
@@ -3907,17 +3919,13 @@ try {
           }
           track.appendChild(itemDiv);
 
-          const applyLazyAura = () => {
-            extractImageDominantColor(imgEl, function(color) {
-              if (color) {
-                imgEl.style.setProperty('--item-aura-color', color);
-              }
-            });
-          };
-          if (imgEl.complete && imgEl.naturalWidth > 0) {
-            applyLazyAura();
+          const savedItemAura = (item && item.aura && String(item.aura).trim() && String(item.aura).trim().toLowerCase() !== 'none')
+            ? formatSavedAuraGlow(String(item.aura).trim(), 0.88)
+            : '';
+          if (savedItemAura) {
+            imgEl.style.setProperty('--item-aura-color', savedItemAura);
           } else {
-            imgEl.addEventListener('load', applyLazyAura, { once: true });
+            imgEl.style.removeProperty('--item-aura-color');
           }
         });
       }
@@ -4092,6 +4100,10 @@ try {
         captionEl.innerHTML = escapeHtmlAttr(item.caption || (ytInfo ? (ytInfo.isShorts ? 'YouTube Shorts' : 'YouTube Video') : '')) + ytDirectLink;
       }
 
+      const savedModalAura = (item && item.aura && String(item.aura).trim() && String(item.aura).trim().toLowerCase() !== 'none')
+        ? formatSavedAuraGlow(String(item.aura).trim(), 0.88)
+        : '';
+
       if (isVideo && ytInfo) {
         try {
           if (typeof window.pauseBlutuGameMusicTemporary === 'function') {
@@ -4107,6 +4119,11 @@ try {
         if (modalImg) modalImg.style.display = 'none';
         if (videoWrapper) {
           videoWrapper.style.display = 'block';
+          if (savedModalAura) {
+            videoWrapper.style.setProperty('--modal-aura-color', savedModalAura);
+          } else {
+            videoWrapper.style.removeProperty('--modal-aura-color');
+          }
           if (ytInfo.isShorts) {
             videoWrapper.style.width = 'min(86vw, 380px)';
             videoWrapper.style.height = 'min(76vh, 675px)';
@@ -4134,30 +4151,24 @@ try {
         if (videoIframe) {
           videoIframe.src = 'about:blank';
         }
-        if (videoWrapper) videoWrapper.style.display = 'none';
+        if (videoWrapper) {
+          videoWrapper.style.display = 'none';
+          videoWrapper.style.removeProperty('--modal-aura-color');
+        }
         if (modalImg) {
           modalImg.style.display = 'block';
-          modalImg.style.removeProperty('--modal-aura-color');
-          modalImg.style.boxShadow = '';
+          if (savedModalAura) {
+            modalImg.style.setProperty('--modal-aura-color', savedModalAura);
+            modalImg.style.boxShadow = `0 0 52px ${savedModalAura}, 0 0 22px ${savedModalAura}`;
+          } else {
+            modalImg.style.removeProperty('--modal-aura-color');
+            modalImg.style.boxShadow = '';
+          }
           delete modalImg.dataset.fallbackTried;
           modalImg.referrerPolicy = 'no-referrer';
           modalImg.setAttribute('referrerpolicy', 'no-referrer');
           modalImg.removeAttribute('crossorigin');
           modalImg.src = cleanSrc;
-
-          const applyCurrentModalAura = () => {
-            const expectedSrc = modalImg.currentSrc || modalImg.src;
-            extractImageDominantColor(modalImg, function(color) {
-              if ((modalImg.currentSrc || modalImg.src) !== expectedSrc) return;
-              if (color) {
-                modalImg.style.setProperty('--modal-aura-color', color);
-                modalImg.style.boxShadow = `0 0 52px ${color}, 0 0 22px ${color}`;
-              } else {
-                modalImg.style.removeProperty('--modal-aura-color');
-                modalImg.style.boxShadow = '';
-              }
-            });
-          };
 
           modalImg.onerror = function() {
             if (cleanSrc.includes('lh3.googleusercontent.com/d/') && !this.dataset.fallbackTried) {
@@ -4165,12 +4176,9 @@ try {
               const fileIdMatch = cleanSrc.match(/\/d\/([a-zA-Z0-9_-]+)/);
               if (fileIdMatch && fileIdMatch[1]) {
                 this.src = `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`;
-                this.addEventListener('load', applyCurrentModalAura, { once: true });
               }
             }
           };
-
-          applyCurrentModalAura();
         }
       }
     }
@@ -4476,11 +4484,126 @@ try {
       return newKey;
     }
 
+    let galleryMediaUrlScanTimer = null;
+    let galleryMediaScanToken = 0;
+    let galleryMediaInitialNormalizedUrl = '';
+
+    function syncGalleryMediaAuraControlsUI(enabled, statusMsg) {
+      const cb = document.getElementById('galleryMediaUseAuraCheckbox');
+      const wrap = document.getElementById('galleryMediaAuraControlsWrap');
+      const statusEl = document.getElementById('galleryMediaAuraScanStatus');
+      if (cb) cb.checked = Boolean(enabled);
+      if (wrap) {
+        wrap.style.opacity = enabled ? '1' : '0.42';
+        wrap.style.pointerEvents = enabled ? 'auto' : 'none';
+      }
+      if (statusEl && typeof statusMsg === 'string') {
+        statusEl.textContent = statusMsg;
+      }
+    }
+
+    function toggleGalleryMediaUseAura(checked) {
+      const enabled = Boolean(checked);
+      const auraInput = document.getElementById('galleryMediaAuraInput');
+      const urlInput = document.getElementById('galleryMediaUrlInput');
+      const curHex = (auraInput ? auraInput.value.trim() : '');
+      syncGalleryMediaAuraControlsUI(
+        enabled,
+        enabled ? (curHex ? `Aura activa (${curHex})` : 'Listo para extraer 1 vez') : 'Sin aura propia (usa color de galería)'
+      );
+      if (enabled && !curHex) {
+        const candidateSrc = (urlInput && urlInput.value.trim()) ? urlInput.value.trim() : galleryMediaOriginalDataSrc;
+        if (candidateSrc) {
+          rescanGalleryMediaAuraFromUrl(false);
+        }
+      }
+    }
+    window.toggleGalleryMediaUseAura = toggleGalleryMediaUseAura;
+
+    function handleGalleryMediaManualAuraColor(val) {
+      const hex = String(val || '').trim().toUpperCase();
+      const auraInput = document.getElementById('galleryMediaAuraInput');
+      if (auraInput && hex) auraInput.value = hex;
+      syncGalleryMediaAuraControlsUI(true, `Color personalizado (${hex})`);
+    }
+    window.handleGalleryMediaManualAuraColor = handleGalleryMediaManualAuraColor;
+
+    function handleGalleryMediaManualAuraText(val) {
+      const trimmed = String(val || '').trim();
+      const picker = document.getElementById('galleryMediaAuraPicker');
+      const hex = rgbOrCssToHexUpper(trimmed);
+      if (picker && hex) picker.value = hex.toLowerCase();
+      if (trimmed) {
+        syncGalleryMediaAuraControlsUI(true, `Color definido (${hex || trimmed})`);
+      }
+    }
+    window.handleGalleryMediaManualAuraText = handleGalleryMediaManualAuraText;
+
+    async function rescanGalleryMediaAuraFromUrl(forceRefresh = false) {
+      if (galleryMediaModalMode !== 'add' && galleryMediaModalMode !== 'edit') return '';
+      const urlInput = document.getElementById('galleryMediaUrlInput');
+      const auraInput = document.getElementById('galleryMediaAuraInput');
+      const auraPicker = document.getElementById('galleryMediaAuraPicker');
+      const cb = document.getElementById('galleryMediaUseAuraCheckbox');
+      const statusEl = document.getElementById('galleryMediaAuraScanStatus');
+
+      const candidateSrc = (urlInput && urlInput.value.trim()) ? urlInput.value.trim() : galleryMediaOriginalDataSrc;
+      if (!candidateSrc) {
+        if (forceRefresh) showToastNotification('Ingresa primero la URL de la imagen o video para extraer su color.', true);
+        return '';
+      }
+
+      const token = ++galleryMediaScanToken;
+      if (statusEl) statusEl.textContent = 'Escaneando color 1 vez...';
+
+      const extractedHex = await extractAuraHexOnceForAdmin(candidateSrc, forceRefresh);
+      if (token !== galleryMediaScanToken) return extractedHex;
+
+      if (extractedHex) {
+        if (auraInput) auraInput.value = extractedHex;
+        if (auraPicker) auraPicker.value = extractedHex.toLowerCase();
+        if (forceRefresh && cb && !cb.checked) {
+          syncGalleryMediaAuraControlsUI(true, `✨ Extraído: ${extractedHex}`);
+        } else {
+          const isChecked = cb ? cb.checked : true;
+          syncGalleryMediaAuraControlsUI(isChecked, isChecked ? `✨ Extraído: ${extractedHex}` : `Extraído (${extractedHex}) — desactivado`);
+        }
+      } else {
+        if (statusEl) statusEl.textContent = 'No se pudo extraer (elige color manual o desactiva)';
+      }
+      return extractedHex;
+    }
+    window.rescanGalleryMediaAuraFromUrl = rescanGalleryMediaAuraFromUrl;
+
+    function handleGalleryMediaUrlInputForAura(rawVal) {
+      if (galleryMediaModalMode !== 'add' && galleryMediaModalMode !== 'edit') return;
+      if (galleryMediaUrlScanTimer) {
+        clearTimeout(galleryMediaUrlScanTimer);
+        galleryMediaUrlScanTimer = null;
+      }
+      const trimmed = String(rawVal || '').trim();
+      if (!trimmed) return;
+      if (trimmed === galleryMediaInitialNormalizedUrl) return;
+
+      galleryMediaUrlScanTimer = setTimeout(() => {
+        galleryMediaUrlScanTimer = null;
+        galleryMediaInitialNormalizedUrl = trimmed;
+        rescanGalleryMediaAuraFromUrl(false);
+      }, 340);
+    }
+    window.handleGalleryMediaUrlInputForAura = handleGalleryMediaUrlInputForAura;
+
     function openGalleryMediaModal(mode = 'add', targetIndex = null) {
       if (!window.__adminModalsMounted) { ensureAdminModalsReady().then(() => openGalleryMediaModal(mode, targetIndex)); return; }
       galleryMediaModalMode = mode;
       galleryMediaTargetIndex = targetIndex;
       galleryMediaOriginalDataSrc = '';
+      if (galleryMediaUrlScanTimer) {
+        clearTimeout(galleryMediaUrlScanTimer);
+        galleryMediaUrlScanTimer = null;
+      }
+      galleryMediaScanToken++;
+      galleryMediaInitialNormalizedUrl = '';
 
       const modal = document.getElementById('galleryMediaModal');
       const titleEl = document.getElementById('galleryMediaModalTitle');
@@ -4488,6 +4611,9 @@ try {
       const urlInput = document.getElementById('galleryMediaUrlInput');
       const capGroup = document.getElementById('galleryMediaCaptionGroup');
       const capInput = document.getElementById('galleryMediaCaptionInput');
+      const auraGroup = document.getElementById('galleryMediaAuraGroup');
+      const auraInput = document.getElementById('galleryMediaAuraInput');
+      const auraPicker = document.getElementById('galleryMediaAuraPicker');
       const fileInput = document.getElementById('galleryMediaModalFileInput');
       const confirmBtn = document.getElementById('galleryMediaConfirmBtn');
 
@@ -4497,17 +4623,22 @@ try {
       urlInput.placeholder = 'https://...';
       if (capInput) capInput.value = '';
       if (fileInput) fileInput.value = '';
+      if (auraInput) auraInput.value = '';
+      if (auraPicker) auraPicker.value = '#5a74bf';
 
       if (mode === 'add') {
         if (titleEl) titleEl.textContent = '🖼️ Añadir Foto o Video';
         if (urlLabel) urlLabel.textContent = 'URL de Imagen, Google Drive o YouTube / Shorts:';
         if (capGroup) capGroup.style.display = 'block';
+        if (auraGroup) auraGroup.style.display = 'block';
         if (fileInput) fileInput.multiple = true;
         if (confirmBtn) confirmBtn.textContent = 'Añadir';
+        syncGalleryMediaAuraControlsUI(true, 'Se escaneará 1 vez al insertar');
       } else if (mode === 'edit') {
         if (titleEl) titleEl.textContent = '🖼️ Cambiar Foto o Video';
         if (urlLabel) urlLabel.textContent = 'URL de Imagen, Google Drive o YouTube / Shorts:';
         if (capGroup) capGroup.style.display = 'block';
+        if (auraGroup) auraGroup.style.display = 'block';
         if (fileInput) fileInput.multiple = false;
         if (confirmBtn) confirmBtn.textContent = 'Guardar';
 
@@ -4521,19 +4652,36 @@ try {
             urlInput.placeholder = 'Archivo local cargado (pega URL o sube otro para reemplazar)';
           } else {
             urlInput.value = rawSrc;
+            galleryMediaInitialNormalizedUrl = rawSrc.trim();
           }
           if (capInput) capInput.value = item.caption || '';
+
+          const existingAura = (item.aura && String(item.aura).trim() && String(item.aura).trim().toLowerCase() !== 'none')
+            ? String(item.aura).trim()
+            : '';
+          if (existingAura) {
+            const hex = rgbOrCssToHexUpper(existingAura) || existingAura;
+            if (auraInput) auraInput.value = hex;
+            if (auraPicker && /^#[0-9A-F]{6}$/i.test(hex)) auraPicker.value = hex.toLowerCase();
+            syncGalleryMediaAuraControlsUI(true, `Color guardado (${hex})`);
+          } else {
+            syncGalleryMediaAuraControlsUI(false, 'Sin aura propia (usa color de galería)');
+          }
+        } else {
+          syncGalleryMediaAuraControlsUI(false, 'Sin aura propia');
         }
       } else if (mode === 'merch-add') {
         if (titleEl) titleEl.textContent = '🛍️ Añadir Foto al Producto';
         if (urlLabel) urlLabel.textContent = 'URL de la Imagen o Google Drive:';
         if (capGroup) capGroup.style.display = 'none';
+        if (auraGroup) auraGroup.style.display = 'none';
         if (fileInput) fileInput.multiple = true;
         if (confirmBtn) confirmBtn.textContent = 'Añadir Foto';
       } else if (mode === 'merch-edit') {
         if (titleEl) titleEl.textContent = '🛍️ Cambiar Foto del Producto';
         if (urlLabel) urlLabel.textContent = 'URL de la Imagen o Google Drive:';
         if (capGroup) capGroup.style.display = 'none';
+        if (auraGroup) auraGroup.style.display = 'none';
         if (fileInput) fileInput.multiple = false;
         if (confirmBtn) confirmBtn.textContent = 'Guardar Foto';
 
@@ -4559,6 +4707,11 @@ try {
     window.openGalleryMediaModal = openGalleryMediaModal;
 
     function closeGalleryMediaModal() {
+      if (galleryMediaUrlScanTimer) {
+        clearTimeout(galleryMediaUrlScanTimer);
+        galleryMediaUrlScanTimer = null;
+      }
+      galleryMediaScanToken++;
       const modal = document.getElementById('galleryMediaModal');
       if (modal) modal.style.display = 'none';
       const fileInput = document.getElementById('galleryMediaModalFileInput');
@@ -4566,26 +4719,36 @@ try {
     }
     window.closeGalleryMediaModal = closeGalleryMediaModal;
 
-    function buildGalleryItemFromUrl(rawUrl, captionText) {
+    function buildGalleryItemFromUrl(rawUrl, captionText, auraHex = '') {
       const url = cleanOrTransformMediaUrl(rawUrl);
       const ytInfo = parseYouTubeUrl(url);
+      const cleanAura = (auraHex && String(auraHex).trim() && String(auraHex).trim().toLowerCase() !== 'none')
+        ? (rgbOrCssToHexUpper(auraHex) || String(auraHex).trim())
+        : '';
       if (ytInfo) {
-        return {
+        const videoItem = {
           src: url,
           caption: captionText !== undefined && captionText !== '' ? captionText : (ytInfo.isShorts ? 'YouTube Shorts' : 'YouTube Video'),
           type: ytInfo.isShorts ? 'shorts' : 'video',
           thumb: ytInfo.thumbnailUrl
         };
+        if (cleanAura) videoItem.aura = cleanAura;
+        return videoItem;
       }
-      return {
+      const photoItem = {
         src: url,
         caption: captionText || ''
       };
+      if (cleanAura) photoItem.aura = cleanAura;
+      return photoItem;
     }
 
-    function confirmGalleryMediaModal() {
+    async function confirmGalleryMediaModal() {
       const urlInput = document.getElementById('galleryMediaUrlInput');
       const capInput = document.getElementById('galleryMediaCaptionInput');
+      const useAuraCb = document.getElementById('galleryMediaUseAuraCheckbox');
+      const auraInput = document.getElementById('galleryMediaAuraInput');
+      const confirmBtn = document.getElementById('galleryMediaConfirmBtn');
       const rawUrl = urlInput ? urlInput.value.trim() : '';
       const caption = capInput ? capInput.value.trim() : '';
 
@@ -4594,8 +4757,20 @@ try {
           showToastNotification('Ingresa una URL o sube un archivo desde tu dispositivo.', true);
           return;
         }
+        let chosenAura = '';
+        if (!useAuraCb || useAuraCb.checked) {
+          chosenAura = auraInput ? auraInput.value.trim() : '';
+          if (!chosenAura) {
+            if (confirmBtn) confirmBtn.disabled = true;
+            try {
+              chosenAura = await extractAuraHexOnceForAdmin(rawUrl, false);
+            } finally {
+              if (confirmBtn) confirmBtn.disabled = false;
+            }
+          }
+        }
         const activeKey = ensureActiveGallery();
-        galleriesData[activeKey].items.push(buildGalleryItemFromUrl(rawUrl, caption));
+        galleriesData[activeKey].items.push(buildGalleryItemFromUrl(rawUrl, caption, chosenAura));
         persistGalleryLocalCache();
         closeGalleryMediaModal();
         loadGallery(activeKey, true);
@@ -4608,9 +4783,21 @@ try {
           showToastNotification('Ingresa una URL o sube un archivo desde tu dispositivo.', true);
           return;
         }
+        let chosenAura = '';
+        if (useAuraCb && useAuraCb.checked) {
+          chosenAura = auraInput ? auraInput.value.trim() : '';
+          if (!chosenAura) {
+            if (confirmBtn) confirmBtn.disabled = true;
+            try {
+              chosenAura = await extractAuraHexOnceForAdmin(finalUrl, false);
+            } finally {
+              if (confirmBtn) confirmBtn.disabled = false;
+            }
+          }
+        }
         const activeKey = ensureActiveGallery();
         if (galleriesData[activeKey] && galleriesData[activeKey].items[galleryMediaTargetIndex]) {
-          galleriesData[activeKey].items[galleryMediaTargetIndex] = buildGalleryItemFromUrl(finalUrl, caption);
+          galleriesData[activeKey].items[galleryMediaTargetIndex] = buildGalleryItemFromUrl(finalUrl, caption, chosenAura);
           persistGalleryLocalCache();
           closeGalleryMediaModal();
           loadGallery(activeKey, true);
@@ -4646,111 +4833,118 @@ try {
     }
     window.confirmGalleryMediaModal = confirmGalleryMediaModal;
 
-    function handleGalleryMediaModalFileChange(event) {
-      const files = event.target.files;
-      if (!files || files.length === 0) return;
+    async function handleGalleryMediaModalFileChange(event) {
+      const files = Array.from((event && event.target && event.target.files) || []);
+      if (files.length === 0) return;
       const capInput = document.getElementById('galleryMediaCaptionInput');
       const typedCaption = capInput ? capInput.value.trim() : '';
-
-      const results = [];
-      let readCount = 0;
+      const useAuraCb = document.getElementById('galleryMediaUseAuraCheckbox');
+      const shouldScanAuraOnce = (galleryMediaModalMode === 'add' || galleryMediaModalMode === 'edit') && (!useAuraCb || useAuraCb.checked);
       const total = files.length;
 
-      Array.from(files).forEach((file, i) => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          results[i] = {
-            src: e.target.result,
+      try {
+        const results = await Promise.all(files.map(async (file) => {
+          const compressedSrc = await compressUploadedImageFileToDataUrl(file, 1150, 0.80);
+          const scannedAura = shouldScanAuraOnce ? await extractAuraHexOnceForAdmin(compressedSrc, false) : '';
+          return {
+            src: compressedSrc,
+            aura: scannedAura,
             defaultCaption: file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').trim()
           };
-          readCount++;
-          if (readCount === total) {
-            event.target.value = '';
-            if (galleryMediaModalMode === 'add') {
-              const activeKey = ensureActiveGallery();
-              results.forEach((r, rIdx) => {
-                if (!r) return;
-                galleriesData[activeKey].items.push({
-                  src: r.src,
-                  caption: (total === 1 && typedCaption) ? typedCaption : r.defaultCaption
-                });
-              });
-              persistGalleryLocalCache();
-              closeGalleryMediaModal();
-              loadGallery(activeKey, true);
-              currentIndex = getMaxIndex();
-              updateCarousel();
-              showToastNotification(`✨ ${total > 1 ? total + ' fotos añadidas' : 'Foto añadida'} a la galería`);
-            } else if (galleryMediaModalMode === 'edit') {
-              const activeKey = ensureActiveGallery();
-              if (results[0] && galleriesData[activeKey] && galleriesData[activeKey].items[galleryMediaTargetIndex]) {
-                galleriesData[activeKey].items[galleryMediaTargetIndex] = {
-                  src: results[0].src,
-                  caption: typedCaption || galleriesData[activeKey].items[galleryMediaTargetIndex].caption || results[0].defaultCaption
-                };
-                persistGalleryLocalCache();
-                closeGalleryMediaModal();
-                loadGallery(activeKey, true);
-                if (document.getElementById('imageModal')?.style.display === 'flex') {
-                  updateModalPhoto();
-                }
-                showToastNotification('✨ Foto reemplazada');
-              }
-            } else if (galleryMediaModalMode === 'merch-add') {
-              const idx = galleryMediaTargetIndex;
-              if (merchItemsData[idx] && typeof appendPhotosToMerchItem === 'function') {
-                appendPhotosToMerchItem(idx, results.filter(Boolean).map(r => r.src));
-                closeGalleryMediaModal();
-                showToastNotification(`✨ ${total > 1 ? total + ' fotos añadidas' : 'Foto añadida'} al producto`);
-              }
-            } else if (galleryMediaModalMode === 'merch-edit') {
-              const idx = galleryMediaTargetIndex;
-              if (results[0] && merchItemsData[idx] && typeof replacePhotoInMerchItem === 'function') {
-                replacePhotoInMerchItem(idx, results[0].src);
-                closeGalleryMediaModal();
-                showToastNotification('✨ Foto del producto reemplazada');
-              }
+        }));
+
+        if (event && event.target) event.target.value = '';
+
+        if (galleryMediaModalMode === 'add') {
+          const activeKey = ensureActiveGallery();
+          results.forEach((r) => {
+            if (!r || !r.src) return;
+            const entry = {
+              src: r.src,
+              caption: (total === 1 && typedCaption) ? typedCaption : r.defaultCaption
+            };
+            if (r.aura) entry.aura = r.aura;
+            galleriesData[activeKey].items.push(entry);
+          });
+          persistGalleryLocalCache();
+          closeGalleryMediaModal();
+          loadGallery(activeKey, true);
+          currentIndex = getMaxIndex();
+          updateCarousel();
+          showToastNotification(`✨ ${total > 1 ? total + ' fotos añadidas' : 'Foto añadida'} a la galería`);
+        } else if (galleryMediaModalMode === 'edit') {
+          const activeKey = ensureActiveGallery();
+          if (results[0] && galleriesData[activeKey] && galleriesData[activeKey].items[galleryMediaTargetIndex]) {
+            const updatedEntry = {
+              src: results[0].src,
+              caption: typedCaption || galleriesData[activeKey].items[galleryMediaTargetIndex].caption || results[0].defaultCaption
+            };
+            if (results[0].aura) updatedEntry.aura = results[0].aura;
+            galleriesData[activeKey].items[galleryMediaTargetIndex] = updatedEntry;
+            persistGalleryLocalCache();
+            closeGalleryMediaModal();
+            loadGallery(activeKey, true);
+            if (document.getElementById('imageModal')?.style.display === 'flex') {
+              updateModalPhoto();
             }
+            showToastNotification('✨ Foto reemplazada');
           }
-        };
-        reader.readAsDataURL(file);
-      });
+        } else if (galleryMediaModalMode === 'merch-add') {
+          const idx = galleryMediaTargetIndex;
+          if (merchItemsData[idx] && typeof appendPhotosToMerchItem === 'function') {
+            appendPhotosToMerchItem(idx, results.filter(Boolean).map(r => r.src));
+            closeGalleryMediaModal();
+            showToastNotification(`✨ ${total > 1 ? total + ' fotos añadidas' : 'Foto añadida'} al producto`);
+          }
+        } else if (galleryMediaModalMode === 'merch-edit') {
+          const idx = galleryMediaTargetIndex;
+          if (results[0] && merchItemsData[idx] && typeof replacePhotoInMerchItem === 'function') {
+            replacePhotoInMerchItem(idx, results[0].src);
+            closeGalleryMediaModal();
+            showToastNotification('✨ Foto del producto reemplazada');
+          }
+        }
+      } catch (err) {
+        if (event && event.target) event.target.value = '';
+        showToastNotification('No se pudo procesar la imagen seleccionada.', true);
+      }
     }
     window.handleGalleryMediaModalFileChange = handleGalleryMediaModalFileChange;
 
-    function handlePhotoFileUpload(event) {
-      const files = event.target.files;
-      if (!files || files.length === 0) return;
+    async function handlePhotoFileUpload(event) {
+      const files = Array.from((event && event.target && event.target.files) || []);
+      if (files.length === 0) return;
 
       const activeKey = ensureActiveGallery();
-      let loadedCount = 0;
       const totalFiles = files.length;
-      const orderedUploads = new Array(totalFiles);
+      const autoAuraCb = document.getElementById('inlineGalleryAutoAuraCheckbox');
+      const shouldScanAuraOnce = !autoAuraCb || autoAuraCb.checked;
 
-      Array.from(files).forEach((file, idx) => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const base64Src = e.target.result;
-          const defaultCaption = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").trim();
-          orderedUploads[idx] = {
-            src: base64Src,
-            caption: defaultCaption
+      try {
+        const orderedUploads = await Promise.all(files.map(async (file) => {
+          const compressedSrc = await compressUploadedImageFileToDataUrl(file, 1150, 0.80);
+          const scannedAura = shouldScanAuraOnce ? await extractAuraHexOnceForAdmin(compressedSrc, false) : '';
+          const entry = {
+            src: compressedSrc,
+            caption: file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").trim()
           };
-          loadedCount++;
-          if (loadedCount === totalFiles) {
-            orderedUploads.forEach(u => {
-              if (u) galleriesData[activeKey].items.push(u);
-            });
-            event.target.value = '';
-            persistGalleryLocalCache();
-            loadGallery(activeKey, true);
-            currentIndex = getMaxIndex();
-            updateCarousel();
-            showToastNotification(`✨ ${totalFiles > 1 ? totalFiles + ' fotos subidas' : 'Foto subida'} a "${galleriesData[activeKey].title}"`);
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+          if (scannedAura) entry.aura = scannedAura;
+          return entry;
+        }));
+
+        orderedUploads.forEach(u => {
+          if (u && u.src) galleriesData[activeKey].items.push(u);
+        });
+        if (event && event.target) event.target.value = '';
+        persistGalleryLocalCache();
+        loadGallery(activeKey, true);
+        currentIndex = getMaxIndex();
+        updateCarousel();
+        showToastNotification(`✨ ${totalFiles > 1 ? totalFiles + ' fotos subidas' : 'Foto subida'} a "${galleriesData[activeKey].title}"`);
+      } catch (err) {
+        if (event && event.target) event.target.value = '';
+        showToastNotification('No se pudo procesar la foto seleccionada.', true);
+      }
     }
     window.handlePhotoFileUpload = handlePhotoFileUpload;
 
@@ -5081,8 +5275,9 @@ try {
       if (document.getElementById('blogReadModal')?.style.display === 'flex') {
         syncLiveBlogModalToMemory(true);
       }
-      const todayIso = new Date().toISOString().split('T')[0];
-      const uniqueId = 'post_' + Date.now();
+      const nowIso = new Date().toISOString();
+      const todayIso = nowIso.split('T')[0];
+      const uniqueId = 'post_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
       const newPost = {
         id: uniqueId,
         title: '',
@@ -5095,10 +5290,14 @@ try {
         hidden: false,
         preview: '',
         content: '',
-        createdAt: new Date().toISOString()
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
+      unmarkPostDeleted(newPost);
       postsData.unshift(newPost);
       window.postsData = postsData;
+      markPostsPendingCloudSync([newPost]);
+      persistPostsToLocalVaults();
       currentBlogPage = 0;
       renderBlogPosts();
       renderAdminPostsList();
@@ -5289,6 +5488,7 @@ try {
     window.serializeEditableBlogBodyToContent = serializeEditableBlogBodyToContent;
 
     let pendingPostsVaultTimer = null;
+    let pendingLiveBlogDomSyncTimer = null;
 
     function persistPostsToLocalVaults() {
       if (pendingPostsVaultTimer) {
@@ -5315,10 +5515,23 @@ try {
       pendingPostsVaultTimer = setTimeout(() => {
         pendingPostsVaultTimer = null;
         persistPostsToLocalVaults();
-      }, 280);
+      }, 850);
     }
 
+    function scheduleLiveBlogModalSync() {
+      if (pendingLiveBlogDomSyncTimer) clearTimeout(pendingLiveBlogDomSyncTimer);
+      pendingLiveBlogDomSyncTimer = setTimeout(() => {
+        pendingLiveBlogDomSyncTimer = null;
+        syncLiveBlogModalToMemory(false);
+      }, 420);
+    }
+    window.scheduleLiveBlogModalSync = scheduleLiveBlogModalSync;
+
     function syncLiveBlogModalToMemory(persistLocal = false) {
+      if (pendingLiveBlogDomSyncTimer) {
+        clearTimeout(pendingLiveBlogDomSyncTimer);
+        pendingLiveBlogDomSyncTimer = null;
+      }
       const post = getActiveEditableBlogPost();
       if (!post) return false;
       const modal = document.getElementById('blogReadModal');
@@ -5329,7 +5542,7 @@ try {
       if (!titleEl || !bodyEl) return false;
 
       const isGameBlog = Boolean(currentGameBlogKey && gamesData && gamesData.blogs && gamesData.blogs[currentGameBlogKey]);
-      if (!post.id) post.id = isGameBlog ? ('game_' + currentGameBlogKey) : ('post_' + Date.now());
+      if (!post.id) post.id = isGameBlog ? ('game_' + currentGameBlogKey) : ('post_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
 
       const rawTitle = (titleEl.innerText || '').replace(/\r?\n/g, ' ').trim();
       post.title = persistLocal ? (rawTitle || 'Sin Título') : rawTitle;
@@ -5364,9 +5577,12 @@ try {
         }
       } else {
         window.postsData = postsData;
+        unmarkPostDeleted(post);
+        markPostsPendingCloudSync([post], { immediate: Boolean(persistLocal) });
         if (persistLocal) {
-          unmarkPostIdDeleted(post.id);
           persistPostsToLocalVaults();
+        } else {
+          schedulePersistPostsToLocalVaults();
         }
       }
       return true;
@@ -5382,7 +5598,10 @@ try {
         persistGamesLocalCache();
         closeBlogModal(true);
         if (typeof window.persistSiteDataInRealtime === 'function') {
-          window.persistSiteDataInRealtime(true);
+          window.persistSiteDataInRealtime(false, {
+            allowAuthPopup: true,
+            customSuccessToast: '✨ Blog de juego guardado permanentemente'
+          });
         }
         return;
       }
@@ -5392,7 +5611,10 @@ try {
       closeBlogModal(true);
       if (idx !== null && postsData[idx]) {
         if (typeof window.persistSiteDataInRealtime === 'function') {
-          window.persistSiteDataInRealtime(true);
+          window.persistSiteDataInRealtime(false, {
+            allowAuthPopup: true,
+            customSuccessToast: '✨ Publicación guardada permanentemente en la nube'
+          });
         } else if (typeof window.persistSingleBlogPostToCloud === 'function') {
           window.persistSingleBlogPostToCloud(postsData[idx]);
         }
@@ -5450,6 +5672,7 @@ try {
       if (!postsData[postIndex] || !el) return;
       postsData[postIndex].title = (el.innerText || '').replace(/\u2011/g, '-').replace(/\r?\n/g, ' ').trim();
       postsData[postIndex].updatedAt = new Date().toISOString();
+      markPostsPendingCloudSync([postsData[postIndex]]);
       schedulePersistPostsToLocalVaults();
     }
     window.handleCardInlineTitleInput = handleCardInlineTitleInput;
@@ -5459,6 +5682,7 @@ try {
       postsData[postIndex].dateIso = newIso;
       postsData[postIndex].date = formatIsoToSpanishDate(newIso);
       postsData[postIndex].updatedAt = new Date().toISOString();
+      markPostsPendingCloudSync([postsData[postIndex]], { immediate: true });
       persistPostsToLocalVaults();
       renderBlogPosts();
       renderAdminPostsList();
@@ -5471,6 +5695,7 @@ try {
       const autoVal = computeAutoPostPreview(postsData[postIndex].content || '');
       postsData[postIndex].preview = (val === autoVal) ? '' : val;
       postsData[postIndex].updatedAt = new Date().toISOString();
+      markPostsPendingCloudSync([postsData[postIndex]]);
       schedulePersistPostsToLocalVaults();
     }
     window.handleCardInlinePreviewInput = handleCardInlinePreviewInput;
@@ -6054,13 +6279,13 @@ try {
         const post = postsData[idx];
         post.imageFit = cropVal;
         post.updatedAt = new Date().toISOString();
+        markPostsPendingCloudSync([post], { immediate: true });
         renderBlogPosts();
         persistPostsToLocalVaults();
-        if (typeof window.persistSingleBlogPostToCloud === 'function') {
-          window.persistSingleBlogPostToCloud(post);
-        }
         if (typeof window.persistSiteDataInRealtime === 'function') {
           window.persistSiteDataInRealtime();
+        } else if (typeof window.persistSingleBlogPostToCloud === 'function') {
+          window.persistSingleBlogPostToCloud(post);
         }
         if (typeof showToastNotification === 'function') {
           showToastNotification('✂️ Miniatura actualizada');
@@ -6090,11 +6315,21 @@ try {
         if (modalBody && hasPendingBlogParagraphReveal(modalBody)) {
           resetBlogParagraphRevealState(modalBody);
         }
-        if (!bodyEl.children.length && !(bodyEl.textContent || '').trim()) {
+        const hasAnyText = Boolean((bodyEl.textContent || '').trim());
+        if (!bodyEl.children.length && !hasAnyText) {
           bodyEl.innerHTML = '<p><br></p>';
         }
-        syncBlogParagraphFirstLetterColors(bodyEl);
-        syncLiveBlogModalToMemory(false);
+        const hasAnyFigure = Boolean(bodyEl.querySelector('figure, img.inline-img'));
+        bodyEl.setAttribute('data-is-empty', (hasAnyText || hasAnyFigure) ? 'false' : 'true');
+
+        // Solo recalcular capitular del párrafo activo en vez de recorrer todo el DOM en cada tecla
+        const sel = window.getSelection ? window.getSelection() : null;
+        const anchorNode = sel && sel.anchorNode ? (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement) : null;
+        const activeP = anchorNode && anchorNode.closest ? anchorNode.closest('p') : null;
+        if (activeP && bodyEl.contains(activeP)) {
+          syncBlogParagraphFirstLetterColors(activeP);
+        }
+        scheduleLiveBlogModalSync();
       });
 
       bodyEl.addEventListener('blur', () => {
@@ -6202,17 +6437,11 @@ try {
       const idx = Number(postIndex);
       if (isNaN(idx) || idx < 0 || !postsData[idx]) return;
       postsData[idx].hidden = !postsData[idx].hidden;
+      postsData[idx].updatedAt = new Date().toISOString();
 
       window.postsData = postsData;
-      try {
-        const cachedRaw = localStorage.getItem('blutu_live_site_data');
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw);
-          cached.posts = postsData;
-          cached.updatedAt = Date.now();
-          localStorage.setItem('blutu_live_site_data', JSON.stringify(cached));
-        }
-      } catch (err) {}
+      markPostsPendingCloudSync([postsData[idx]]);
+      persistPostsToLocalVaults();
 
       renderBlogPosts();
       renderAdminPostsList();
@@ -6232,7 +6461,7 @@ try {
       }
 
       if (typeof window.persistSiteDataInRealtime === 'function') {
-        window.persistSiteDataInRealtime(true);
+        window.persistSiteDataInRealtime(true, { allowAuthPopup: true });
       }
     }
     window.toggleModalPostVisibility = toggleModalPostVisibility;
@@ -6336,10 +6565,12 @@ try {
 
       const deletedPost = postsData[idx];
       const deletedTitle = deletedPost.title || 'Publicación';
-      const delKey = String(deletedPost.id || (deletedPost.title + '_' + (deletedPost.dateIso || ''))).trim();
+      const exactId = String(deletedPost.id || '').trim();
+      const fallbackComposite = String((deletedPost.title || '') + '_' + (deletedPost.dateIso || '')).trim();
 
-      // Registrar claves en la lista en memoria y localStorage de eliminados intencionales
-      markPostIdsDeleted([delKey, deletedPost.id]);
+      // Registrar únicamente el ID exacto cuando existe (evita bloquear futuros blogs con el mismo título o "Sin Título")
+      markPostIdsDeleted(exactId ? [exactId] : [fallbackComposite]);
+      removePostPendingCloudSync(deletedPost);
 
       // 1. Eliminar del array postsData y alinear índice activo del modal
       const wasOpenDeletedPost = (currentBlogIndex === idx);
@@ -6353,7 +6584,7 @@ try {
       // 2. Sincronizar referencia global de window
       window.postsData = postsData;
 
-      // 3. Actualizar la caché local en localStorage e IndexedDB inmediatamente
+      // 3. Actualizar la caché local en localStorage e IndexedDB inmediatamente (permitiendo poda explícita)
       try {
         localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(postsData));
         const cachedRaw = localStorage.getItem('blutu_live_site_data');
@@ -6367,6 +6598,9 @@ try {
             posts: postsData,
             updatedAt: Date.now()
           }));
+        }
+        if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+          BlutuVault.savePosts(postsData, { allowPrune: true });
         }
       } catch (e) {
         console.warn('Error actualizando caché tras eliminar publicación:', e);
@@ -6384,7 +6618,7 @@ try {
         window.archiveSingleBlogPostInCloud(deletedPost);
       }
       if (typeof window.persistSiteDataInRealtime === 'function') {
-        const saved = await window.persistSiteDataInRealtime(true);
+        const saved = await window.persistSiteDataInRealtime(true, { allowAuthPopup: true });
         if (typeof window.showToastNotification === 'function') {
           if (saved) {
             window.showToastNotification(`🗑️ Publicación "${deletedTitle}" archivada con éxito.`);
@@ -6429,19 +6663,28 @@ try {
     function resolveImageSourceUrlForPixelPicker(imgSourceIdOrUrl) {
       let raw = '';
       if (typeof imgSourceIdOrUrl === 'string' && imgSourceIdOrUrl.trim()) {
-        const el = document.getElementById(imgSourceIdOrUrl.trim());
+        const trimmedKey = imgSourceIdOrUrl.trim();
+        const el = document.getElementById(trimmedKey);
         if (el) {
           if (el.tagName === 'IMG' && (el.currentSrc || el.src)) {
             raw = (el.currentSrc || el.src).trim();
           } else if (typeof el.value === 'string') {
             raw = el.value.trim();
           }
+          if (!raw && trimmedKey === 'galleryMediaUrlInput' && galleryMediaOriginalDataSrc) {
+            raw = galleryMediaOriginalDataSrc;
+          }
         } else {
-          raw = imgSourceIdOrUrl.trim();
+          raw = trimmedKey;
         }
       }
 
       if (!raw) return '';
+
+      const ytInfo = parseYouTubeUrl(raw);
+      if (ytInfo && ytInfo.thumbnailUrl) {
+        return ytInfo.thumbnailUrl;
+      }
 
       // Convertir enlaces de visor de Google Drive a imagen directa si aplica
       const driveMatch = raw.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=view&)?id=)([a-zA-Z0-9_-]+)/i);
@@ -6490,6 +6733,11 @@ try {
     function applyAuraPixelColor(hexColor) {
       if (!hexColor) return;
       const upperHex = hexColor.toUpperCase();
+      if (currentPixelTargetTextId === 'modalImgAura') {
+        syncModalImgAuraControlsUI(true, `Color capturado (${upperHex})`);
+      } else if (currentPixelTargetTextId === 'galleryMediaAuraInput') {
+        syncGalleryMediaAuraControlsUI(true, `Color capturado (${upperHex})`);
+      }
       if (currentPixelTargetTextId) {
         const txtEl = document.getElementById(currentPixelTargetTextId);
         if (txtEl) {
@@ -7606,18 +7854,23 @@ try {
       pendingMerchCacheTimer = setTimeout(() => {
         pendingMerchCacheTimer = null;
         persistMerchLocalCache();
-      }, 280);
+      }, 850);
     }
 
     function flushAllPendingLocalCaches() {
+      if (typeof pendingLiveBlogDomSyncTimer !== 'undefined' && pendingLiveBlogDomSyncTimer) {
+        syncLiveBlogModalToMemory(true);
+      }
       if (pendingGalleryCacheTimer) persistGalleryLocalCache();
       if (pendingPostsVaultTimer) persistPostsToLocalVaults();
       if (pendingMerchCacheTimer) persistMerchLocalCache();
       if (typeof pendingGamesLocalCacheTimer !== 'undefined' && pendingGamesLocalCacheTimer) persistGamesLocalCache();
+      flushPendingCloudSyncQueueToStorage();
     }
     window.flushAllPendingLocalCaches = flushAllPendingLocalCaches;
 
     window.addEventListener('pagehide', flushAllPendingLocalCaches, { passive: true });
+    window.addEventListener('beforeunload', flushAllPendingLocalCaches);
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) flushAllPendingLocalCaches();
     });
@@ -8712,37 +8965,34 @@ try {
       }
     }
 
-    function handleMerchModalMultiFileUpload(event) {
-      const files = Array.from(event.target.files || []);
+    async function handleMerchModalMultiFileUpload(event) {
+      const files = Array.from((event && event.target && event.target.files) || []);
       if (files.length === 0) return;
       const targetIdx = merchModalUploadTarget.realIdx !== null ? merchModalUploadTarget.realIdx : currentModalMerchIdx;
       const mode = merchModalUploadTarget.mode || 'append';
       if (targetIdx === null || !merchItemsData[targetIdx]) return;
 
-      const results = [];
-      let loaded = 0;
-      files.forEach(file => {
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-          if (ev.target && ev.target.result) {
-            results.push(ev.target.result);
+      if (event && event.target) event.target.value = '';
+
+      try {
+        const results = (await Promise.all(
+          files.map(file => compressUploadedImageFileToDataUrl(file, 1100, 0.80))
+        )).filter(Boolean);
+
+        if (mode === 'replace' && results[0]) {
+          replacePhotoInMerchItem(targetIdx, results[0]);
+          if (typeof showToastNotification === 'function') showToastNotification('Foto del producto actualizada.');
+        } else if (results.length > 0) {
+          appendPhotosToMerchItem(targetIdx, results);
+          if (typeof showToastNotification === 'function') {
+            showToastNotification(results.length === 1 ? 'Foto añadida al producto.' : `${results.length} fotos añadidas al producto.`);
           }
-          loaded++;
-          if (loaded === files.length) {
-            if (mode === 'replace' && results[0]) {
-              replacePhotoInMerchItem(targetIdx, results[0]);
-              if (typeof showToastNotification === 'function') showToastNotification('Foto del producto actualizada.');
-            } else if (results.length > 0) {
-              appendPhotosToMerchItem(targetIdx, results);
-              if (typeof showToastNotification === 'function') {
-                showToastNotification(results.length === 1 ? 'Foto añadida al producto.' : `${results.length} fotos añadidas al producto.`);
-              }
-            }
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-      event.target.value = '';
+        }
+      } catch (err) {
+        if (typeof showToastNotification === 'function') {
+          showToastNotification('No se pudo procesar la foto del producto.', true);
+        }
+      }
     }
 
     function moveMerchModalPhoto(realIdx, imgIdx, dir) {
@@ -9296,14 +9546,19 @@ try {
       renderMerchSection();
     }
 
-    function handleMerchPhotoFileUploadGrid(event, index) {
-      const file = event.target.files && event.target.files[0];
+    async function handleMerchPhotoFileUploadGrid(event, index) {
+      const file = event && event.target && event.target.files && event.target.files[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        replacePhotoInMerchItem(index, e.target.result);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressedSrc = await compressUploadedImageFileToDataUrl(file, 1100, 0.80);
+        if (event && event.target) event.target.value = '';
+        replacePhotoInMerchItem(index, compressedSrc);
+      } catch (err) {
+        if (event && event.target) event.target.value = '';
+        if (typeof showToastNotification === 'function') {
+          showToastNotification('No se pudo procesar la imagen del producto.', true);
+        }
+      }
     }
 
     function moveMerchItemOrder(index, dir) {
@@ -9684,6 +9939,7 @@ try {
         if (merchDescEl) merchDescEl.textContent = merchSectionDescription;
 
         try {
+          clearAllPendingCloudSync();
           localStorage.setItem('blutu_hidden_comments', JSON.stringify(hiddenCommentIds));
           localStorage.setItem('blutu_buzon_visible', String(isBuzonSectionVisible));
           localStorage.setItem('blutu_games_visible', String(isGamesSectionVisible));
@@ -9707,20 +9963,19 @@ try {
             },
             buzon: {
               isVisible: isBuzonSectionVisible,
-              gamesVisible: isGamesSectionVisible,
-              hiddenCommentIds: hiddenCommentIds,
-              gamesData: gamesData
+              gamesVisible: isGamesSectionVisible
             },
             muro: {
               isVisible: isBuzonSectionVisible,
               gamesVisible: isGamesSectionVisible,
               hiddenCommentIds: hiddenCommentIds,
+              deletedPostIds: Array.from(getDeletedPostIdsSet()).slice(0, 500),
               gamesData: gamesData
             },
             updatedAt: Date.now()
           }));
           if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
-            BlutuVault.savePosts(postsData);
+            BlutuVault.savePosts(postsData, { allowPrune: true });
           }
         } catch (err) {}
       }
@@ -9755,12 +10010,20 @@ try {
         executeDiscardMasterAdminData();
         return;
       }
+      const baselinePostsSig = adminEditSessionBaseline
+        ? JSON.stringify(normalizePostsForBaselineCompare(adminEditSessionBaseline.posts))
+        : '';
+      const currentPostsSig = JSON.stringify(normalizePostsForBaselineCompare(Array.isArray(postsData) ? postsData : []));
+      const hasPostsDiff = Boolean(adminEditSessionBaseline && baselinePostsSig !== currentPostsSig);
+
       if (typeof openGothicConfirmModal === 'function') {
         openGothicConfirmModal({
-          icon: '↩️',
-          title: '¿No guardar cambios?',
-          message: 'Se descartarán todas las modificaciones hechas en esta sesión de edición y la página volverá a su estado anterior.',
-          confirmText: '↩️ No guardar cambios',
+          icon: hasPostsDiff ? '⚠️' : '↩️',
+          title: hasPostsDiff ? '¿Descartar también tus publicaciones?' : '¿No guardar cambios?',
+          message: hasPostsDiff
+            ? 'En esta sesión creaste o editaste publicaciones de Pensamientos. Si eliges "No guardar cambios", esas publicaciones también se desharán. Para conservarlas permanentemente, pulsa "Cancelar" y luego "Guardar cambios".'
+            : 'Se descartarán todas las modificaciones hechas en esta sesión de edición y la página volverá a su estado anterior.',
+          confirmText: '↩️ Descartar todo',
           onConfirm: () => {
             executeDiscardMasterAdminData();
           }
@@ -9778,10 +10041,11 @@ try {
       if (typeof flushAllPendingLocalCaches === 'function') {
         flushAllPendingLocalCaches();
       }
-      // Si había algún modal de edición directa abierto, cerrarlo limpiamente al guardar
+      // Si había algún modal de edición directa abierto, cerrarlo limpiamente sincronizando su contenido
       const openBlogModalEl = document.getElementById('blogReadModal');
       if (openBlogModalEl && openBlogModalEl.style.display !== 'none') {
-        closeBlogModal();
+        syncLiveBlogModalToMemory(true);
+        closeBlogModal(true);
       }
       const openMerchModalEl = document.getElementById('merchDetailModal');
       if (openMerchModalEl && openMerchModalEl.style.display !== 'none') {
@@ -9806,7 +10070,7 @@ try {
         galleriesData = reordered;
       }
 
-      // Sincronizar hacia window para persistencia
+      // Sincronizar hacia window y bóveda permanente antes de cerrar modo edición
       window.postsData = postsData;
       window.galleriesData = galleriesData;
       window.liveButtonsData = liveButtonsData;
@@ -9821,6 +10085,7 @@ try {
       window.gamesData = gamesData;
       window.isBuzonSectionVisible = isBuzonSectionVisible;
       window.hiddenCommentIds = hiddenCommentIds;
+      persistPostsToLocalVaults();
       persistGamesLocalCache();
 
       // Limpiar instantánea de sesión al confirmar el guardado maestro
@@ -9840,9 +10105,9 @@ try {
         applyAllSectionsChangesToDOM();
       }
 
-      // 2. Persistir en Firestore en tiempo real (sin descargar index.html)
+      // 2. Persistir en Firestore en tiempo real permitiendo popup de Google Auth si aún no había sesión activa
       if (typeof window.persistSiteDataInRealtime === 'function') {
-        await window.persistSiteDataInRealtime();
+        await window.persistSiteDataInRealtime(false, { allowAuthPopup: true });
       } else if (typeof showToastNotification === 'function') {
         showToastNotification('¡Todos los cambios han sido aplicados en tiempo real a la página!');
       }
@@ -10418,6 +10683,110 @@ try {
     }
     window.insertFormat = insertFormat;
 
+    let modalImgUrlScanTimer = null;
+    let modalImgAuraScanToken = 0;
+    let modalImgInitialNormalizedUrl = '';
+
+    function syncModalImgAuraControlsUI(enabled, statusMsg) {
+      const cb = document.getElementById('modalImgUseAuraCheckbox');
+      const wrap = document.getElementById('modalImgAuraControlsWrap');
+      const statusEl = document.getElementById('modalImgAuraScanStatus');
+      if (cb) cb.checked = Boolean(enabled);
+      if (wrap) {
+        wrap.style.opacity = enabled ? '1' : '0.42';
+        wrap.style.pointerEvents = enabled ? 'auto' : 'none';
+      }
+      if (statusEl && typeof statusMsg === 'string') {
+        statusEl.textContent = statusMsg;
+      }
+    }
+
+    function toggleModalImgUseAura(checked) {
+      const enabled = Boolean(checked);
+      const auraInput = document.getElementById('modalImgAura');
+      const urlInput = document.getElementById('modalImgUrl');
+      const curHex = auraInput ? auraInput.value.trim() : '';
+      syncModalImgAuraControlsUI(
+        enabled,
+        enabled ? (curHex ? `Aura activa (${curHex})` : 'Listo para extraer 1 vez') : 'Sin aura (desactivado)'
+      );
+      if (enabled && !curHex && urlInput && urlInput.value.trim()) {
+        rescanModalImgAuraFromUrl(false);
+      }
+    }
+    window.toggleModalImgUseAura = toggleModalImgUseAura;
+
+    function handleModalImgManualAuraColor(val) {
+      const hex = String(val || '').trim().toUpperCase();
+      const auraInput = document.getElementById('modalImgAura');
+      if (auraInput && hex) auraInput.value = hex;
+      syncModalImgAuraControlsUI(true, `Color personalizado (${hex})`);
+    }
+    window.handleModalImgManualAuraColor = handleModalImgManualAuraColor;
+
+    function handleModalImgManualAuraText(val) {
+      const trimmed = String(val || '').trim();
+      const picker = document.getElementById('modalImgAuraPicker');
+      const hex = rgbOrCssToHexUpper(trimmed);
+      if (picker && hex) picker.value = hex.toLowerCase();
+      if (trimmed) {
+        syncModalImgAuraControlsUI(true, `Color definido (${hex || trimmed})`);
+      }
+    }
+    window.handleModalImgManualAuraText = handleModalImgManualAuraText;
+
+    async function rescanModalImgAuraFromUrl(forceRefresh = false) {
+      const urlInput = document.getElementById('modalImgUrl');
+      const auraInput = document.getElementById('modalImgAura');
+      const auraPicker = document.getElementById('modalImgAuraPicker');
+      const cb = document.getElementById('modalImgUseAuraCheckbox');
+      const statusEl = document.getElementById('modalImgAuraScanStatus');
+
+      const rawUrl = urlInput ? urlInput.value.trim() : '';
+      if (!rawUrl) {
+        if (forceRefresh) showToastNotification('Ingresa primero la URL de la imagen para extraer su color.', true);
+        return '';
+      }
+
+      const token = ++modalImgAuraScanToken;
+      if (statusEl) statusEl.textContent = 'Escaneando color 1 vez...';
+
+      const extractedHex = await extractAuraHexOnceForAdmin(rawUrl, forceRefresh);
+      if (token !== modalImgAuraScanToken) return extractedHex;
+
+      if (extractedHex) {
+        if (auraInput) auraInput.value = extractedHex;
+        if (auraPicker) auraPicker.value = extractedHex.toLowerCase();
+        if (forceRefresh && cb && !cb.checked) {
+          syncModalImgAuraControlsUI(true, `✨ Extraído: ${extractedHex}`);
+        } else {
+          const isChecked = cb ? cb.checked : true;
+          syncModalImgAuraControlsUI(isChecked, isChecked ? `✨ Extraído: ${extractedHex}` : `Extraído (${extractedHex}) — desactivado`);
+        }
+      } else {
+        if (statusEl) statusEl.textContent = 'No se pudo extraer (elige color manual o desactiva)';
+      }
+      return extractedHex;
+    }
+    window.rescanModalImgAuraFromUrl = rescanModalImgAuraFromUrl;
+
+    function handleModalImgUrlInputForAura(rawVal) {
+      if (modalImgUrlScanTimer) {
+        clearTimeout(modalImgUrlScanTimer);
+        modalImgUrlScanTimer = null;
+      }
+      const trimmed = String(rawVal || '').trim();
+      if (!trimmed) return;
+      if (trimmed === modalImgInitialNormalizedUrl) return;
+
+      modalImgUrlScanTimer = setTimeout(() => {
+        modalImgUrlScanTimer = null;
+        modalImgInitialNormalizedUrl = trimmed;
+        rescanModalImgAuraFromUrl(false);
+      }, 340);
+    }
+    window.handleModalImgUrlInputForAura = handleModalImgUrlInputForAura;
+
     function openBlogImageModal(mode = 'insert-inline', targetFigure = null) {
       if (!window.__adminModalsMounted) {
         saveCurrentBlogSelection();
@@ -10427,6 +10796,13 @@ try {
       activeBlogImageModalMode = mode;
       activeEditingInlineFigure = targetFigure || null;
       saveCurrentBlogSelection();
+
+      if (modalImgUrlScanTimer) {
+        clearTimeout(modalImgUrlScanTimer);
+        modalImgUrlScanTimer = null;
+      }
+      modalImgAuraScanToken++;
+      modalImgInitialNormalizedUrl = '';
 
       const titleEl = document.getElementById('insertImageModalTitle');
       const urlInput = document.getElementById('modalImgUrl');
@@ -10439,30 +10815,55 @@ try {
 
       if (mode === 'cover') {
         const post = getActiveEditableBlogPost() || {};
-        pendingModalCoverOriginalUrl = (post.image || '').trim();
+        const existingUrl = (post.image || '').trim();
+        const existingAura = (post.imageAura && String(post.imageAura).trim() && String(post.imageAura).trim().toLowerCase() !== 'none')
+          ? String(post.imageAura).trim()
+          : '';
+        pendingModalCoverOriginalUrl = existingUrl;
         pendingModalCoverImageFit = post.imageFit || 'cover-center';
+        modalImgInitialNormalizedUrl = existingUrl;
+
         if (titleEl) titleEl.textContent = '🖼️ Imagen de Portada';
-        if (urlInput) urlInput.value = post.image || '';
+        if (urlInput) urlInput.value = existingUrl;
         if (captionInput) captionInput.value = post.imageCaption || '';
-        if (auraInput) auraInput.value = post.imageAura || '';
-        if (auraPicker) auraPicker.value = normalizeCssColorToHex(post.imageAura || '') || '#5a74bf';
+        const normHex = normalizeCssColorToHex(existingAura) || rgbOrCssToHexUpper(existingAura) || '';
+        if (auraInput) auraInput.value = normHex || existingAura;
+        if (auraPicker) auraPicker.value = normHex ? normHex.toLowerCase() : '#5a74bf';
         if (fitGroup) fitGroup.style.display = 'block';
-        if (removeBtn) removeBtn.style.display = (post.image && post.image.trim()) ? 'inline-flex' : 'none';
+        if (removeBtn) removeBtn.style.display = existingUrl ? 'inline-flex' : 'none';
         if (confirmBtn) confirmBtn.textContent = 'Aplicar Portada';
+
+        if (!existingUrl) {
+          syncModalImgAuraControlsUI(true, 'Se escaneará 1 vez al insertar');
+        } else if (existingAura) {
+          syncModalImgAuraControlsUI(true, `Color guardado (${normHex || existingAura})`);
+        } else {
+          syncModalImgAuraControlsUI(false, 'Sin aura (desactivado)');
+        }
       } else if (mode === 'edit-inline' && targetFigure) {
         const imgEl = targetFigure.querySelector('img');
         const capEl = targetFigure.querySelector('figcaption');
-        const curUrl = targetFigure.getAttribute('data-img-url') || (imgEl ? imgEl.getAttribute('src') : '') || '';
+        const curUrl = (targetFigure.getAttribute('data-img-url') || (imgEl ? imgEl.getAttribute('src') : '') || '').trim();
         const curCap = capEl ? (capEl.innerText || '').trim() : '';
-        const curAura = targetFigure.getAttribute('data-aura') || (imgEl ? imgEl.getAttribute('data-aura') : '') || '';
+        const rawCurAura = (targetFigure.getAttribute('data-aura') || (imgEl ? imgEl.getAttribute('data-aura') : '') || '').trim();
+        const curAura = rawCurAura.toLowerCase() === 'none' ? '' : rawCurAura;
+        modalImgInitialNormalizedUrl = curUrl;
+
         if (titleEl) titleEl.textContent = '🖼️ Editar Imagen del Artículo';
         if (urlInput) urlInput.value = curUrl;
         if (captionInput) captionInput.value = curCap;
-        if (auraInput) auraInput.value = curAura;
-        if (auraPicker) auraPicker.value = normalizeCssColorToHex(curAura || '') || '#5a74bf';
+        const normHex = normalizeCssColorToHex(curAura) || rgbOrCssToHexUpper(curAura) || '';
+        if (auraInput) auraInput.value = normHex || curAura;
+        if (auraPicker) auraPicker.value = normHex ? normHex.toLowerCase() : '#5a74bf';
         if (fitGroup) fitGroup.style.display = 'none';
         if (removeBtn) removeBtn.style.display = 'inline-flex';
         if (confirmBtn) confirmBtn.textContent = 'Aplicar Cambios';
+
+        if (curAura) {
+          syncModalImgAuraControlsUI(true, `Color guardado (${normHex || curAura})`);
+        } else {
+          syncModalImgAuraControlsUI(false, 'Sin aura (desactivado)');
+        }
       } else {
         let initialUrl = '';
         if (savedBlogSelectionRange) {
@@ -10477,6 +10878,12 @@ try {
         if (fitGroup) fitGroup.style.display = 'none';
         if (removeBtn) removeBtn.style.display = 'none';
         if (confirmBtn) confirmBtn.textContent = 'Insertar Imagen';
+
+        syncModalImgAuraControlsUI(true, 'Se escaneará 1 vez al insertar');
+        if (initialUrl) {
+          modalImgInitialNormalizedUrl = initialUrl;
+          rescanModalImgAuraFromUrl(false);
+        }
       }
 
       const modal = document.getElementById('insertImageModal');
@@ -10492,6 +10899,11 @@ try {
     }
 
     function closeInsertImageModal() {
+      if (modalImgUrlScanTimer) {
+        clearTimeout(modalImgUrlScanTimer);
+        modalImgUrlScanTimer = null;
+      }
+      modalImgAuraScanToken++;
       const modal = document.getElementById('insertImageModal');
       if (modal) modal.style.display = 'none';
     }
@@ -10512,14 +10924,31 @@ try {
     }
     window.removeImageFromInsertModal = removeImageFromInsertModal;
 
-    function confirmInsertImageModal() {
+    async function confirmInsertImageModal() {
       const url = (document.getElementById('modalImgUrl')?.value || '').trim();
       const caption = (document.getElementById('modalImgCaption')?.value || '').trim();
-      const aura = (document.getElementById('modalImgAura')?.value || '').trim();
+      const useAuraCb = document.getElementById('modalImgUseAuraCheckbox');
+      const auraInput = document.getElementById('modalImgAura');
+      const confirmBtn = document.getElementById('modalImgConfirmBtn');
 
       if (!url) {
         showToastNotification('Por favor ingresa la URL de la imagen.', true);
         return;
+      }
+
+      let aura = '';
+      if (!useAuraCb || useAuraCb.checked) {
+        aura = auraInput ? auraInput.value.trim() : '';
+        if (!aura) {
+          if (confirmBtn) confirmBtn.disabled = true;
+          try {
+            aura = await extractAuraHexOnceForAdmin(url, false);
+          } finally {
+            if (confirmBtn) confirmBtn.disabled = false;
+          }
+        }
+        const normalizedHex = rgbOrCssToHexUpper(aura);
+        if (normalizedHex) aura = normalizedHex;
       }
 
       const modalBody = document.getElementById('blogModalBody');
@@ -11838,12 +12267,9 @@ Object.assign(window, {
   moveSlide,
   createDots,
   updateDots,
-  sampleAverageAuraFromDrawable,
   isSameOriginOrLocalMedia,
-  sampleAuraFromBlob,
-  sampleAuraViaCorsImage,
-  computeUntaintedAuraForUrl,
-  extractImageDominantColor,
+  extractAuraHexOnceForAdmin,
+  formatSavedAuraGlow,
   calculateReadableTextColor,
   parseYouTubeUrl,
   cleanOrTransformMediaUrl,
@@ -11890,6 +12316,7 @@ Object.assign(window, {
   serializeEditableBlogBodyToContent,
   persistPostsToLocalVaults,
   schedulePersistPostsToLocalVaults,
+  scheduleLiveBlogModalSync,
   syncLiveBlogModalToMemory,
   finishInlineBlogEdit,
   handlePlainTextPaste,
@@ -12070,6 +12497,16 @@ Object.assign(window, {
   closeInsertImageModal,
   removeImageFromInsertModal,
   confirmInsertImageModal,
+  toggleModalImgUseAura,
+  handleModalImgManualAuraColor,
+  handleModalImgManualAuraText,
+  rescanModalImgAuraFromUrl,
+  handleModalImgUrlInputForAura,
+  toggleGalleryMediaUseAura,
+  handleGalleryMediaManualAuraColor,
+  handleGalleryMediaManualAuraText,
+  rescanGalleryMediaAuraFromUrl,
+  handleGalleryMediaUrlInputForAura,
   openInsertLinkModal,
   closeInsertLinkModal,
   removeLinkFromInsertModal,

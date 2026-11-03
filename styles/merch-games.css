@@ -1688,6 +1688,58 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-tap-highlight-color: transparent;
+      transition: background-color 0.36s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.36s ease, box-shadow 0.36s ease;
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active {
+      background-color: var(--vspc-win-bg, #162344);
+      background-image: radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.075) 0%, rgba(0, 0, 0, 0.44) 82%);
+      border-color: var(--vspc-win-border, #7c9ce8);
+      box-shadow:
+        0 0 38px var(--vspc-win-glow, rgba(59, 102, 212, 0.52)),
+        inset 0 0 30px var(--vspc-win-inner-glow, rgba(59, 102, 212, 0.22)),
+        inset 0 0 22px rgba(0, 0, 0, 0.68);
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active > .close-blog-modal,
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .minigame-mute-btn:not(.is-muted) {
+      background-color: var(--vspc-turn-hud-bg, rgba(14, 19, 32, 0.94));
+      border-color: var(--vspc-turn-hud-border, rgba(140, 162, 230, 0.62));
+      color: var(--vspc-turn-accent, var(--accent-light));
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active > .close-blog-modal:hover,
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .minigame-mute-btn:hover {
+      border-color: var(--white);
+      color: var(--white);
+      box-shadow: 0 0 10px var(--vspc-win-glow, rgba(140, 162, 230, 0.55));
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .minigame-hud-bar.is-vspc-memorama {
+      background-color: var(--vspc-turn-hud-bg, rgba(8, 12, 22, 0.92));
+      border-color: var(--vspc-turn-hud-border, rgba(140, 162, 230, 0.62));
+      box-shadow: inset 0 0 14px var(--vspc-win-inner-glow, rgba(59, 102, 212, 0.18));
+      transition: background-color 0.36s ease, border-color 0.36s ease, box-shadow 0.36s ease;
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .minigame-turn-pill,
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .minigame-hud-value.is-active-turn {
+      color: var(--vspc-turn-accent, var(--accent-light));
+      text-shadow: 0 0 12px var(--vspc-win-glow, rgba(140, 162, 230, 0.72));
+      transition: color 0.3s ease, text-shadow 0.3s ease;
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .memorama-card:not(.is-flipped):not(.is-matched) .memorama-card-back {
+      border-color: var(--vspc-card-back-border, rgba(140, 162, 230, 0.5));
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-active .memorama-card-back-emblem {
+      color: var(--vspc-card-emblem, rgba(140, 162, 230, 0.72));
+      transition: color 0.3s ease;
+    }
+
+    #blogReadModal .blog-modal-box.is-minigame-active.is-vspc-turn-pc .memorama-card:not(.is-matched) {
+      cursor: default;
     }
 
     #blogReadModal .blog-modal-box.is-minigame-active > .close-blog-modal {

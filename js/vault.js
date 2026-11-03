@@ -19,8 +19,21 @@ export function purgeObsoleteLocalStorage() {
 }
 
 export function initFreshServerVersionCheck(getCurrentBuildTimestamp) {
+  const isBusyEditingOrSaving = function () {
+    if (typeof window === "undefined") return false;
+    if (window.isAdminMode) return true;
+    if ((Number(window.__pendingCloudSaveCount) || 0) > 0) return true;
+    if (hasPendingCloudSyncChanges()) return true;
+    const modalIds = ["blogReadModal", "merchDetailModal", "galleryMediaModal", "cartConfigModal", "passwordModal", "adminModal"];
+    for (let i = 0; i < modalIds.length; i++) {
+      const el = document.getElementById(modalIds[i]);
+      if (el && el.style && el.style.display && el.style.display !== "none") return true;
+    }
+    return false;
+  };
+
   const runVersionCheck = function () {
-    if (document.hidden) return;
+    if (document.hidden || isBusyEditingOrSaving()) return;
     try {
       const checkTarget = "/index.html?_chk=" + Date.now();
       fetch(checkTarget, {
@@ -34,6 +47,7 @@ export function initFreshServerVersionCheck(getCurrentBuildTimestamp) {
         .then((res) => (res.ok ? res.text() : null))
         .then((htmlText) => {
           if (!htmlText) return;
+          if (isBusyEditingOrSaving()) return;
           const metaMatch = htmlText.match(/<meta[^>]*name=["']blutu-build-timestamp["'][^>]*content=["'](\d+)["']/i);
           const legacyMatch = htmlText.match(/blutuBuildTimestamp\s*=\s*(\d+)/);
           const rawTs = (metaMatch && metaMatch[1]) || (legacyMatch && legacyMatch[1]);
@@ -123,11 +137,247 @@ export function initMobileAppDeepLinks() {
   }
 }
 
-    /* BÓVEDA INDESTRUCTIBLE DE BLOGS (INDEXEDDB + LOCALSTORAGE RESILIENTE) */
+export function getPostTimestampMs(val) {
+  if (!val) return 0;
+  if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+  if (typeof val === "string") {
+    const parsed = Date.parse(val);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (val instanceof Date) {
+    const ms = val.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  if (typeof val === "object") {
+    if (typeof val.toMillis === "function") {
+      try {
+        const ms = val.toMillis();
+        return Number.isFinite(ms) ? ms : 0;
+      } catch (e) { return 0; }
+    }
+    if (typeof val.seconds === "number") {
+      return (val.seconds * 1000) + Math.floor((Number(val.nanoseconds) || 0) / 1e6);
+    }
+  }
+  return 0;
+}
+
+function normalizeStoredTimestampIso(val) {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  const ms = getPostTimestampMs(val);
+  return ms > 0 ? new Date(ms).toISOString() : "";
+}
+
+/* COLA DURADERA DE CAMBIOS PENDIENTES DE NUBE (CACHÉ EN RAM + ESCRITURA AMORTIGUADA SIN BLOQUEAR EL HILO PRINCIPAL) */
+const UNSYNCED_POSTS_STORAGE_KEY = "blutu_unsynced_posts_map_v1";
+const UNSYNCED_SITE_SIG_KEY = "blutu_unsynced_site_sig_v1";
+
+let unsyncedPostsMemCache = null;
+let unsyncedSiteSigMemCache = undefined;
+let unsyncedPostsDirty = false;
+let unsyncedPostsFlushTimer = null;
+
+function ensureUnsyncedPostsMapLoaded() {
+  if (unsyncedPostsMemCache !== null) return unsyncedPostsMemCache;
+  try {
+    const raw = localStorage.getItem(UNSYNCED_POSTS_STORAGE_KEY);
+    if (!raw) {
+      unsyncedPostsMemCache = {};
+      return unsyncedPostsMemCache;
+    }
+    const parsed = JSON.parse(raw);
+    unsyncedPostsMemCache = (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : {};
+  } catch (e) {
+    unsyncedPostsMemCache = {};
+  }
+  return unsyncedPostsMemCache;
+}
+
+function ensureUnsyncedSiteSigLoaded() {
+  if (unsyncedSiteSigMemCache !== undefined) return unsyncedSiteSigMemCache;
+  try {
+    unsyncedSiteSigMemCache = localStorage.getItem(UNSYNCED_SITE_SIG_KEY) || "";
+  } catch (e) {
+    unsyncedSiteSigMemCache = "";
+  }
+  return unsyncedSiteSigMemCache;
+}
+
+export function flushPendingCloudSyncQueueToStorage() {
+  if (unsyncedPostsFlushTimer) {
+    clearTimeout(unsyncedPostsFlushTimer);
+    unsyncedPostsFlushTimer = null;
+  }
+  if (!unsyncedPostsDirty || unsyncedPostsMemCache === null) return;
+  unsyncedPostsDirty = false;
+  try {
+    const keys = Object.keys(unsyncedPostsMemCache);
+    if (keys.length === 0) {
+      localStorage.removeItem(UNSYNCED_POSTS_STORAGE_KEY);
+    } else {
+      localStorage.setItem(UNSYNCED_POSTS_STORAGE_KEY, JSON.stringify(unsyncedPostsMemCache));
+    }
+  } catch (e) {}
+}
+
+function scheduleFlushUnsyncedPostsMap(immediate = false) {
+  unsyncedPostsDirty = true;
+  if (immediate) {
+    flushPendingCloudSyncQueueToStorage();
+    return;
+  }
+  if (unsyncedPostsFlushTimer) return;
+  unsyncedPostsFlushTimer = setTimeout(() => {
+    unsyncedPostsFlushTimer = null;
+    flushPendingCloudSyncQueueToStorage();
+  }, 850);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushPendingCloudSyncQueueToStorage, { passive: true });
+  window.addEventListener("beforeunload", flushPendingCloudSyncQueueToStorage);
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flushPendingCloudSyncQueueToStorage();
+  });
+}
+
+export function markPostsPendingCloudSync(posts, options = {}) {
+  const list = Array.isArray(posts) ? posts : (posts ? [posts] : []);
+  if (list.length === 0) return;
+  const mapObj = ensureUnsyncedPostsMapLoaded();
+  let changed = false;
+  const nowMs = Date.now();
+  list.forEach((p) => {
+    if (!p || p.isArchived) return;
+    const pid = String(p.id || "").trim();
+    if (!pid) return;
+    const normKey = pid.toLowerCase();
+    const updatedIso = normalizeStoredTimestampIso(p.updatedAt) || new Date(nowMs).toISOString();
+    mapObj[normKey] = {
+      ...p,
+      id: pid,
+      updatedAt: updatedIso,
+      _queuedAtMs: nowMs
+    };
+    changed = true;
+  });
+  if (changed) {
+    scheduleFlushUnsyncedPostsMap(Boolean(options && options.immediate));
+  }
+}
+
+export function removePostPendingCloudSync(postOrId) {
+  if (!postOrId) return;
+  const pid = typeof postOrId === "object" ? String(postOrId.id || "").trim() : String(postOrId || "").trim();
+  if (!pid) return;
+  const normKey = pid.toLowerCase();
+  const mapObj = ensureUnsyncedPostsMapLoaded();
+  if (Object.prototype.hasOwnProperty.call(mapObj, normKey)) {
+    delete mapObj[normKey];
+    scheduleFlushUnsyncedPostsMap(true);
+  }
+}
+
+export function clearPostsPendingCloudSync(syncedPosts, syncedStartedAtMs = 0) {
+  const mapObj = ensureUnsyncedPostsMapLoaded();
+  const keys = Object.keys(mapObj);
+  if (keys.length === 0) return;
+  const syncedById = new Map();
+  (Array.isArray(syncedPosts) ? syncedPosts : []).forEach((p) => {
+    if (!p || !p.id) return;
+    syncedById.set(String(p.id).trim().toLowerCase(), p);
+  });
+  let changed = false;
+  keys.forEach((k) => {
+    const queued = mapObj[k];
+    if (!queued) {
+      delete mapObj[k];
+      changed = true;
+      return;
+    }
+    if (syncedById.has(k)) {
+      const syncedPost = syncedById.get(k);
+      const qTime = getPostTimestampMs(queued.updatedAt);
+      const sTime = getPostTimestampMs(syncedPost && syncedPost.updatedAt);
+      const notEditedAfterSyncStart = !syncedStartedAtMs || !queued._queuedAtMs || queued._queuedAtMs <= (syncedStartedAtMs + 50);
+      if (notEditedAfterSyncStart && (sTime >= qTime || computePostsQuickSignature([queued]) === computePostsQuickSignature([syncedPost]))) {
+        delete mapObj[k];
+        changed = true;
+      }
+    }
+  });
+  if (changed) {
+    scheduleFlushUnsyncedPostsMap(true);
+  }
+}
+
+export function clearAllPendingCloudSync() {
+  if (unsyncedPostsFlushTimer) {
+    clearTimeout(unsyncedPostsFlushTimer);
+    unsyncedPostsFlushTimer = null;
+  }
+  unsyncedPostsMemCache = {};
+  unsyncedSiteSigMemCache = "";
+  unsyncedPostsDirty = false;
+  try {
+    localStorage.removeItem(UNSYNCED_POSTS_STORAGE_KEY);
+    localStorage.removeItem(UNSYNCED_SITE_SIG_KEY);
+  } catch (e) {}
+}
+
+export function getPendingCloudSyncPosts() {
+  const mapObj = ensureUnsyncedPostsMapLoaded();
+  const keys = Object.keys(mapObj);
+  if (keys.length === 0) return [];
+  const deletedSet = getDeletedPostIdsSet();
+  const out = [];
+  keys.forEach((k) => {
+    const p = mapObj[k];
+    if (!p || p.isArchived) return;
+    if (deletedSet.has(k)) return;
+    const cleanCopy = { ...p };
+    delete cleanCopy._queuedAtMs;
+    out.push(cleanCopy);
+  });
+  return out;
+}
+
+export function markSitePatchPendingCloudSync(sig) {
+  const nextVal = String(sig || Date.now());
+  if (ensureUnsyncedSiteSigLoaded() === nextVal) return;
+  unsyncedSiteSigMemCache = nextVal;
+  try {
+    localStorage.setItem(UNSYNCED_SITE_SIG_KEY, nextVal);
+  } catch (e) {}
+}
+
+export function clearSitePatchPendingCloudSync(expectedSig = null) {
+  const cur = ensureUnsyncedSiteSigLoaded();
+  if (!cur) return;
+  if (!expectedSig || cur === String(expectedSig)) {
+    unsyncedSiteSigMemCache = "";
+    try {
+      localStorage.removeItem(UNSYNCED_SITE_SIG_KEY);
+    } catch (e) {}
+  }
+}
+
+export function hasPendingCloudSyncChanges() {
+  if (ensureUnsyncedSiteSigLoaded()) return true;
+  const mapObj = ensureUnsyncedPostsMapLoaded();
+  return Object.keys(mapObj).length > 0;
+}
+
+    /* BÓVEDA INDESTRUCTIBLE DE BLOGS (INDEXEDDB DELTA-EFICIENTE + LOCALSTORAGE RESILIENTE) */
     export const BlutuVault = {
       dbName: 'blutu_permanent_vault_v2',
       storeName: 'blogs_vault',
       _dbPromise: null,
+      _savedPostSigByKey: new Map(),
+      _lastPrunedDeletedCount: 0,
 
       getDb() {
         if (this._dbPromise) return this._dbPromise;
@@ -153,35 +403,87 @@ export function initMobileAppDeepLinks() {
         return this._dbPromise;
       },
 
-      _pendingSavePosts: null,
+      _pendingSavePayload: null,
       _isSavingPosts: false,
 
-      async savePosts(posts) {
-        if (!Array.isArray(posts) || posts.length === 0) return;
-        this._pendingSavePosts = posts;
+      async savePosts(posts, options = {}) {
+        if (!Array.isArray(posts)) return;
+        const allowPrune = Boolean(options && options.allowPrune);
+        if (posts.length === 0 && !allowPrune) return;
+        if (this._pendingSavePayload) {
+          this._pendingSavePayload = {
+            posts,
+            allowPrune: this._pendingSavePayload.allowPrune || allowPrune
+          };
+        } else {
+          this._pendingSavePayload = { posts, allowPrune };
+        }
         if (this._isSavingPosts) return;
         this._isSavingPosts = true;
         try {
           const db = await this.getDb();
           if (!db) return;
-          while (this._pendingSavePosts) {
-            const batch = this._pendingSavePosts;
-            this._pendingSavePosts = null;
+          while (this._pendingSavePayload) {
+            const { posts: batch, allowPrune: shouldPrune } = this._pendingSavePayload;
+            this._pendingSavePayload = null;
             const cleanPosts = (typeof deduplicatePosts === 'function') ? deduplicatePosts(batch) : batch;
+            const deletedSet = getDeletedPostIdsSet();
+            const activeKeys = new Set();
+            const postsToPut = [];
+
+            cleanPosts.forEach(post => {
+              if (post && !post.isArchived) {
+                const key = String(post.id || (post.title + '_' + (post.dateIso || ''))).trim();
+                if (key && !deletedSet.has(key.toLowerCase())) {
+                  activeKeys.add(key);
+                  const normalizedPost = { ...post, id: key };
+                  const postSig = computePostsQuickSignature([normalizedPost]);
+                  if (this._savedPostSigByKey.get(key) !== postSig) {
+                    postsToPut.push({ key, normalizedPost, postSig });
+                  }
+                }
+              }
+            });
+
+            const needsKeyScan = shouldPrune || (deletedSet.size !== this._lastPrunedDeletedCount);
+            if (postsToPut.length === 0 && !needsKeyScan) {
+              continue;
+            }
+
             await new Promise((resolve) => {
               try {
                 const tx = db.transaction(this.storeName, 'readwrite');
                 const store = tx.objectStore(this.storeName);
-                store.clear();
-                cleanPosts.forEach(post => {
-                  if (post) {
-                    const key = String(post.id || (post.title + '_' + (post.dateIso || ''))).trim();
-                    if (key) {
-                      store.put({ ...post, id: key });
-                    }
-                  }
+
+                postsToPut.forEach(({ normalizedPost }) => {
+                  store.put(normalizedPost);
                 });
-                tx.oncomplete = () => resolve();
+
+                const keysToDeleteMem = [];
+                if (needsKeyScan) {
+                  const keysReq = store.getAllKeys();
+                  keysReq.onsuccess = () => {
+                    const existingKeys = Array.isArray(keysReq.result) ? keysReq.result : [];
+                    existingKeys.forEach(existingKey => {
+                      const normExisting = String(existingKey || '').trim().toLowerCase();
+                      if (deletedSet.has(normExisting) || (shouldPrune && !activeKeys.has(existingKey))) {
+                        store.delete(existingKey);
+                        keysToDeleteMem.push(existingKey);
+                      }
+                    });
+                  };
+                }
+
+                tx.oncomplete = () => {
+                  postsToPut.forEach(({ key, postSig }) => {
+                    this._savedPostSigByKey.set(key, postSig);
+                  });
+                  keysToDeleteMem.forEach(k => this._savedPostSigByKey.delete(k));
+                  if (needsKeyScan) {
+                    this._lastPrunedDeletedCount = deletedSet.size;
+                  }
+                  resolve();
+                };
                 tx.onerror = () => resolve();
                 tx.onabort = () => resolve();
               } catch (txErr) {
@@ -207,6 +509,12 @@ export function initMobileAppDeepLinks() {
             req.onsuccess = () => {
               const res = req.result || [];
               const clean = (typeof deduplicatePosts === 'function') ? deduplicatePosts(res) : res;
+              clean.forEach(p => {
+                if (p && p.id) {
+                  this._savedPostSigByKey.set(String(p.id).trim(), computePostsQuickSignature([p]));
+                }
+              });
+              this._lastPrunedDeletedCount = getDeletedPostIdsSet().size;
               resolve(clean);
             };
             req.onerror = () => resolve([]);
@@ -231,26 +539,27 @@ export function initMobileAppDeepLinks() {
       if (!a || !b) return false;
       const idA = String(a.id || '').trim().toLowerCase();
       const idB = String(b.id || '').trim().toLowerCase();
-      // 1. Coincidencia directa de ID
+      // 1. Si ambos tienen ID explícito, SOLO son la misma publicación si comparten exactamente el mismo ID.
+      // Esto impide que dos blogs distintos con el mismo título o "Sin Título" se fusionen o borren entre sí.
       if (idA && idB) {
-        if (idA === idB) return true;
-        // Dos publicaciones distintas con IDs generados (post_...) no deben colisionar si aún están vacías
-        if (idA.startsWith('post_') && idB.startsWith('post_')) return false;
+        return idA === idB;
       }
+      // 2. Respaldo únicamente para entradas heredadas sin ID: requiere mismo título real + misma fecha
       const titleA = String(a.title || '').trim();
       const titleB = String(b.title || '').trim();
       if (!titleA || !titleB) return false;
-      // 2. Coincidencia exacta de Título (insensible a mayúsculas/espacios)
-      if (titleA.toLowerCase() === titleB.toLowerCase()) return true;
-      // 3. Coincidencia por slug normalizado sin acentos ni puntuación
+      const lowerA = titleA.toLowerCase();
+      const lowerB = titleB.toLowerCase();
+      if (lowerA === 'sin título' || lowerA === 'sin titulo' || lowerB === 'sin título' || lowerB === 'sin titulo') {
+        return false;
+      }
+      const dateA = String(a.dateIso || '').trim();
+      const dateB = String(b.dateIso || '').trim();
+      if (dateA && dateB && dateA !== dateB) return false;
+      if (lowerA === lowerB) return true;
       const slugA = normalizePostStr(titleA);
       const slugB = normalizePostStr(titleB);
-      if (slugA && slugB && slugA === slugB) return true;
-      // 4. Coincidencia por combinación de título + fecha (solo cuando ambos tienen título)
-      const tdA = normalizePostStr(titleA + (a.dateIso || ''));
-      const tdB = normalizePostStr(titleB + (b.dateIso || ''));
-      if (tdA && tdB && tdA === tdB) return true;
-      return false;
+      return Boolean(slugA && slugB && slugA === slugB && dateA === dateB);
     }
 
     let deletedPostIdsCacheSet = null;
@@ -290,7 +599,7 @@ export function initMobileAppDeepLinks() {
       let changed = false;
       (Array.isArray(ids) ? ids : [ids]).forEach(raw => {
         const norm = String(raw || '').trim().toLowerCase();
-        if (norm && !set.has(norm)) {
+        if (norm && norm !== '_' && !set.has(norm)) {
           set.add(norm);
           changed = true;
         }
@@ -313,14 +622,41 @@ export function initMobileAppDeepLinks() {
       }
     }
 
+    export function unmarkPostDeleted(postOrId) {
+      if (!postOrId) return;
+      if (typeof postOrId === 'string') {
+        unmarkPostIdDeleted(postOrId);
+        return;
+      }
+      const set = getDeletedPostIdsSet();
+      let changed = false;
+      const candidates = [
+        postOrId.id,
+        ((postOrId.title || '') + '_' + (postOrId.dateIso || ''))
+      ];
+      candidates.forEach(raw => {
+        const norm = String(raw || '').trim().toLowerCase();
+        if (norm && set.delete(norm)) {
+          changed = true;
+        }
+      });
+      if (changed) {
+        try {
+          localStorage.setItem('blutu_deleted_post_ids', JSON.stringify(Array.from(set)));
+        } catch (e) {}
+      }
+    }
+
     export function isDeletedPost(p) {
       if (!p || p.isArchived) return true;
       const set = getDeletedPostIdsSet();
       if (set.size === 0) return false;
       const pid = String(p.id || '').trim().toLowerCase();
-      if (pid && set.has(pid)) return true;
+      if (pid) {
+        return set.has(pid);
+      }
       const compositeKey = String((p.title || '') + '_' + (p.dateIso || '')).trim().toLowerCase();
-      return !!(compositeKey && compositeKey !== '_' && set.has(compositeKey));
+      return Boolean(compositeKey && compositeKey !== '_' && set.has(compositeKey));
     }
 
     export function deduplicatePosts(postsList) {
@@ -333,32 +669,51 @@ export function initMobileAppDeepLinks() {
 
         if (existingIndex >= 0) {
           const ex = result[existingIndex];
-          const exTime = ex.updatedAt ? new Date(ex.updatedAt).getTime() : 0;
-          const pTime = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
-          const preferP = pTime >= exTime;
+          const exTime = getPostTimestampMs(ex.updatedAt || ex.createdAt);
+          const pTime = getPostTimestampMs(p.updatedAt || p.createdAt);
+          const strictlyNewer = pTime !== exTime;
+          // Cuando los timestamps empatan (ej. 0 === 0), el primer elemento en la lista (ej. bóveda/nube entrante) tiene prioridad
+          const preferP = pTime > exTime;
           const newer = preferP ? p : ex;
           const older = preferP ? ex : p;
+          const bestUpdatedAt = normalizeStoredTimestampIso(newer.updatedAt) || normalizeStoredTimestampIso(older.updatedAt);
+          const bestCreatedAt = normalizeStoredTimestampIso(older.createdAt) || normalizeStoredTimestampIso(newer.createdAt);
 
-          result[existingIndex] = {
+          const pickStr = (field) => {
+            if (strictlyNewer && typeof newer[field] === 'string') return newer[field];
+            if (typeof newer[field] === 'string' && newer[field].trim() !== '') return newer[field];
+            if (typeof older[field] === 'string' && older[field].trim() !== '') return older[field];
+            return typeof newer[field] === 'string' ? newer[field] : (older[field] || '');
+          };
+
+          const mergedEntry = {
             ...older,
             ...newer,
-            id: newer.id || older.id || ('post_' + Date.now()),
-            title: (newer.title && newer.title.trim()) || older.title || '',
-            date: (newer.date && newer.date.trim()) || older.date || '',
-            dateIso: (newer.dateIso && newer.dateIso.trim()) || older.dateIso || '',
-            content: (typeof newer.content === 'string' && newer.content.trim()) ? newer.content : (older.content || ''),
-            preview: (typeof newer.preview === 'string' && newer.preview.trim()) ? newer.preview : (older.preview || ''),
-            image: (typeof newer.image === 'string') ? newer.image : (older.image || ''),
-            imageCaption: (typeof newer.imageCaption === 'string') ? newer.imageCaption : (older.imageCaption || ''),
+            id: String(newer.id || older.id || ('post_' + Date.now())).trim(),
+            title: pickStr('title'),
+            date: pickStr('date'),
+            dateIso: pickStr('dateIso'),
+            content: pickStr('content'),
+            preview: pickStr('preview'),
+            image: strictlyNewer && typeof newer.image === 'string' ? newer.image : (typeof newer.image === 'string' && newer.image !== '' ? newer.image : (older.image || '')),
+            imageCaption: strictlyNewer && typeof newer.imageCaption === 'string' ? newer.imageCaption : (typeof newer.imageCaption === 'string' && newer.imageCaption !== '' ? newer.imageCaption : (older.imageCaption || '')),
             imageFit: newer.imageFit || older.imageFit || 'cover-center',
-            imageAura: newer.imageAura || older.imageAura || '',
+            imageAura: strictlyNewer && typeof newer.imageAura === 'string' ? newer.imageAura : (newer.imageAura || older.imageAura || ''),
             hidden: typeof newer.hidden === 'boolean' ? newer.hidden : (typeof older.hidden === 'boolean' ? older.hidden : false)
           };
+          if (bestUpdatedAt) mergedEntry.updatedAt = bestUpdatedAt;
+          if (bestCreatedAt) mergedEntry.createdAt = bestCreatedAt;
+          result[existingIndex] = mergedEntry;
         } else {
-          result.push({
+          const entryCopy = {
             ...p,
-            id: p.id || ('post_' + Date.now())
-          });
+            id: String(p.id || ('post_' + Date.now())).trim()
+          };
+          const normUpd = normalizeStoredTimestampIso(p.updatedAt);
+          if (normUpd) entryCopy.updatedAt = normUpd;
+          const normCre = normalizeStoredTimestampIso(p.createdAt);
+          if (normCre) entryCopy.createdAt = normCre;
+          result.push(entryCopy);
         }
       }
       return result;
@@ -378,6 +733,6 @@ export function initMobileAppDeepLinks() {
         p.imageCaption || '',
         p.preview || '',
         (p.content || '').length,
-        p.updatedAt || ''
+        getPostTimestampMs(p.updatedAt)
       ].join(':')).join('|');
     }

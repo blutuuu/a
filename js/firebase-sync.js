@@ -1,5 +1,19 @@
 /* Blutu — Autenticación Google Admin, Muro de Visitas y Sincronización Firestore en Tiempo Real */
-import { deduplicatePosts, BlutuVault } from "./vault.js";
+import {
+  deduplicatePosts,
+  BlutuVault,
+  getDeletedPostIdsSet,
+  markPostIdsDeleted,
+  markPostsPendingCloudSync,
+  clearPostsPendingCloudSync,
+  getPendingCloudSyncPosts,
+  markSitePatchPendingCloudSync,
+  clearSitePatchPendingCloudSync,
+  hasPendingCloudSyncChanges,
+  flushPendingCloudSyncQueueToStorage,
+  computePostsQuickSignature,
+  getPostTimestampMs
+} from "./vault.js";
 
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
     import {
@@ -18,6 +32,8 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
       updateDoc,
       deleteField,
       doc,
+      getDoc,
+      getDocs,
       onSnapshot,
       query,
       orderBy,
@@ -49,11 +65,11 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
       console.error('Error inicializando Firebase:', e);
     }
 
-    // Comprobar conectividad sin provocar fallos de permisos
+    // Comprobar conectividad con carga cero (evita descargar site_data/main por duplicado al arrancar)
     if (db) {
-      getDocFromServer(doc(db, 'site_data', 'main')).catch(err => {
-        if (err && err.message && err.message.includes('offline')) {
-          console.warn('Verificando conexión con Firebase Firestore...');
+      getDocFromServer(doc(db, 'test', 'connection')).catch(err => {
+        if (err && err.message && err.message.includes('the client is offline')) {
+          console.error('Please check your Firebase configuration.');
         }
       });
     }
@@ -80,8 +96,19 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
       return errInfo;
     }
 
+    let resolveInitialAuthReady = null;
+    const authInitialStatePromise = auth
+      ? new Promise((resolve) => {
+          resolveInitialAuthReady = resolve;
+          setTimeout(resolve, 2500);
+        })
+      : Promise.resolve();
+
     async function ensureAdminSignedIn(interactive = true) {
       if (!auth || !googleProvider) return false;
+      if (!auth.currentUser) {
+        await authInitialStatePromise;
+      }
       if (auth.currentUser) {
         const currentEmail = (auth.currentUser.email || '').toLowerCase();
         return ADMIN_EMAILS.includes(currentEmail);
@@ -101,15 +128,29 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
       }
     }
 
-    // Escuchar cambios de estado de autenticación
+    // Escuchar cambios de estado de autenticación y drenar cambios locales pendientes al autenticar
     if (auth) {
       onAuthStateChanged(auth, (user) => {
+        if (resolveInitialAuthReady) {
+          resolveInitialAuthReady();
+          resolveInitialAuthReady = null;
+        }
         if (user) {
           const email = (user.email || '').toLowerCase();
           const isUserAdmin = ADMIN_EMAILS.includes(email);
           window.currentAuthUser = user;
           window.isUserAdmin = isUserAdmin;
           updateAdminAuthUI(user, isUserAdmin);
+          if (isUserAdmin) {
+            setTimeout(() => {
+              if (hasPendingCloudSyncChanges() && typeof persistSiteDataInRealtime === 'function' && !window.__isRevertingAdminSession) {
+                persistSiteDataInRealtime(true, { allowAuthPopup: false, fromAutoFlush: true }).catch(() => {});
+              }
+              if (typeof recoverAnchoredBlogPostsFromCloudOnce === 'function') {
+                recoverAnchoredBlogPostsFromCloudOnce().catch(() => {});
+              }
+            }, 900);
+          }
         } else {
           window.currentAuthUser = null;
           window.isUserAdmin = false;
@@ -117,6 +158,19 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         }
       });
     }
+
+    window.addEventListener('online', () => {
+      if (hasPendingCloudSyncChanges() && auth && auth.currentUser && typeof persistSiteDataInRealtime === 'function') {
+        persistSiteDataInRealtime(true, { allowAuthPopup: false, fromAutoFlush: true }).catch(() => {});
+      }
+    });
+
+    window.addEventListener('beforeunload', (e) => {
+      if ((Number(window.__pendingCloudSaveCount) || 0) > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
 
     let selectedSymbol = '🦇';
     let isSubmitting = false;
@@ -953,15 +1007,20 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         const commentsCol = collection(db, 'comments');
         const commentsQuery = query(commentsCol, orderBy('createdAt', 'desc'), limit(100));
 
+        let lastRenderedCommentsSig = '';
         window.__commentsRealtimeUnsubscribe = onSnapshot(
           commentsQuery,
           snapshot => {
             const comments = [];
+            const sigParts = [];
             snapshot.forEach(docSnap => {
               const data = docSnap.data();
               // Omitir registros de prueba interna
               const isTest = data.name && (data.name === 'Test' || data.name === 'TimingTest' || data.name === 'LongPollingTest');
               if (isTest) return;
+              const createdMs = getPostTimestampMs(data.createdAt);
+              const replyUpdMs = getPostTimestampMs(data.replyUpdatedAt || data.replyCreatedAt);
+              sigParts.push(`${docSnap.id}:${createdMs}:${replyUpdMs}:${(data.reply || '').length}:${(data.content || '').length}`);
               comments.push({
                 id: docSnap.id,
                 name: data.name || 'Anónimo',
@@ -974,6 +1033,9 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
                 replyUpdatedAt: data.replyUpdatedAt || null
               });
             });
+            const nextCommentsSig = sigParts.join('|');
+            if (nextCommentsSig === lastRenderedCommentsSig && comments.length > 0) return;
+            lastRenderedCommentsSig = nextCommentsSig;
             renderComments(comments);
           },
           error => {
@@ -1258,8 +1320,9 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
 
     /* GESTIÓN DE CONTENIDO Y SINCRONIZACIÓN EN TIEMPO REAL DEL SITIO COMPLETO */
     function buildCleanBlogPostDoc(post, safeId, extraFields = {}) {
+      const canonicalId = String(post.id || safeId).trim() || String(safeId);
       const docData = {
-        id: String(safeId).slice(0, 128),
+        id: canonicalId.slice(0, 128),
         title: String(post.title || '').slice(0, 300),
         date: String(post.date || '').slice(0, 100),
         dateIso: String(post.dateIso || '').slice(0, 40),
@@ -1326,7 +1389,7 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         (p.image || '').length + ':' + (p.image || '').slice(-32),
         p.imageCaption || '',
         p.preview || '',
-        (p.content || '').length + ':' + (p.content || '').slice(0, 48) + ':' + (p.content || '').slice(-48)
+        (p.content || '').length + ':' + (p.content || '').slice(0, 48) + ':' + (p.content || '').slice(-48) + ':' + (((p.content || '').match(/#[0-9a-fA-F]{3,8}/g) || []).join(''))
       ].join('~')).join('|');
 
       const gals = (source.galleries && typeof source.galleries === 'object') ? source.galleries : {};
@@ -1339,7 +1402,7 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         const items = Array.isArray(g.items) ? g.items : [];
         const itemsSig = items.map(it => {
           const s = it.src || it.url || '';
-          return `${s.length}:${s.slice(-28)}:${it.caption || ''}`;
+          return `${s.length}:${s.slice(-28)}:${it.caption || ''}:${it.aura || ''}`;
         }).join(',');
         return `${k}:${g.title || ''}:${g.color1 || g.color || ''}:${g.color2 || ''}:[${itemsSig}]`;
       }).join('|');
@@ -1368,7 +1431,7 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         const gb = gd.blogs || {};
         const bSig = ['why', 'memorama', 'sixbysix'].map(k => {
           const b = gb[k] || {};
-          return `${b.title || ''}:${b.dateIso || ''}:${(b.image || '').slice(-32)}:${b.imageCaption || ''}:${b.imageFit || ''}:${b.imageAura || ''}:${(b.content || '').length}:${(b.content || '').slice(0, 40)}:${b.backBtnColor || ''}`;
+          return `${b.title || ''}:${b.dateIso || ''}:${(b.image || '').slice(-32)}:${b.imageCaption || ''}:${b.imageFit || ''}:${b.imageAura || ''}:${(b.content || '').length}:${(b.content || '').slice(0, 40)}:${((b.content || '').match(/#[0-9a-fA-F]{3,8}/g) || []).join('')}:${b.backBtnColor || ''}`;
         }).join('|');
         const mem = gd.memorama || {};
         const pairsSig = (Array.isArray(mem.pairImages) ? mem.pairImages : []).map(u => `${(u || '').length}:${(u || '').slice(-24)}`).join(',');
@@ -1522,23 +1585,183 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
 
     let lastKnownSiteContentSig = '';
     let lastLocalPersistedContentSig = '';
+    let lastCloudConfirmedSiteSig = '';
+    let lastSavedLocalPostsQuickSig = '';
+    let lastSavedLocalSiteStorageSig = '';
+    let hasHydratedRemoteSiteData = false;
+    let resolveRemoteSiteHydrated = null;
+    const remoteSiteHydratedPromise = new Promise((resolve) => {
+      resolveRemoteSiteHydrated = resolve;
+    });
+    function markRemoteSiteDataHydrated() {
+      hasHydratedRemoteSiteData = true;
+      if (resolveRemoteSiteHydrated) {
+        resolveRemoteSiteHydrated();
+        resolveRemoteSiteHydrated = null;
+      }
+    }
 
-    async function persistSiteDataInRealtime(silent = false) {
-      if (window.isAdminMode && !window.__isRevertingAdminSession) {
+    let hasRunCloudAnchorRecovery = false;
+    let lastMissingAuthToastTime = 0;
+    let inFlightSitePersistPromise = null;
+    let queuedSitePersistRequest = null;
+    window.__pendingCloudSaveCount = 0;
+
+    function sortPostsNewestFirst(list) {
+      if (!Array.isArray(list)) return [];
+      return [...list].sort((a, b) => {
+        const dA = Date.parse(a && a.dateIso ? a.dateIso : '') || 0;
+        const dB = Date.parse(b && b.dateIso ? b.dateIso : '') || 0;
+        if (dB !== dA) return dB - dA;
+        return getPostTimestampMs(b && (b.updatedAt || b.createdAt)) - getPostTimestampMs(a && (a.updatedAt || a.createdAt));
+      });
+    }
+
+    function estimateFirestoreJsonBytes(obj) {
+      try {
+        const str = JSON.stringify(obj);
+        if (typeof Blob === 'function') {
+          return new Blob([str]).size;
+        }
+        return str.length * 2;
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    const CLOUD_ANCHOR_SESSION_KEY = 'blutu_cloud_anchor_checked_v2';
+
+    async function recoverAnchoredBlogPostsFromCloudOnce() {
+      if (!db || hasRunCloudAnchorRecovery) return;
+      if (!auth || !auth.currentUser) return;
+      const email = (auth.currentUser.email || '').toLowerCase();
+      if (!ADMIN_EMAILS.includes(email)) return;
+      try {
+        if (sessionStorage.getItem(CLOUD_ANCHOR_SESSION_KEY) === '1') {
+          hasRunCloudAnchorRecovery = true;
+          return;
+        }
+      } catch (e) {}
+      hasRunCloudAnchorRecovery = true;
+
+      try {
+        // Esperar primero a que onSnapshot hidrate site_data/main para no comparar contra posts por defecto ni duplicar lecturas
+        if (!hasHydratedRemoteSiteData) {
+          await Promise.race([
+            remoteSiteHydratedPromise,
+            new Promise((r) => setTimeout(r, 5500))
+          ]);
+        }
+
+        let remoteMainPosts = [];
+        if (!hasHydratedRemoteSiteData) {
+          try {
+            const mainSnap = await getDocFromServer(doc(db, 'site_data', 'main'));
+            if (mainSnap.exists()) {
+              markRemoteSiteDataHydrated();
+              const md = mainSnap.data() || {};
+              if (Array.isArray(md.posts)) remoteMainPosts = md.posts;
+            }
+          } catch (e) {
+            hasRunCloudAnchorRecovery = false;
+            return;
+          }
+        }
+
+        const snap = await getDocs(query(collection(db, 'blog_posts'), limit(250)));
+        try { sessionStorage.setItem(CLOUD_ANCHOR_SESSION_KEY, '1'); } catch (e) {}
+        if (!snap || snap.empty) return;
+
+        const deletedSet = getDeletedPostIdsSet();
+        const currentList = deduplicatePosts([
+          ...(Array.isArray(window.postsData) ? window.postsData : []),
+          ...remoteMainPosts
+        ]);
+        const existingIds = new Set();
+        const existingSafeIds = new Set();
+
+        currentList.forEach(p => {
+          if (!p) return;
+          if (p.id) existingIds.add(String(p.id).trim().toLowerCase());
+          existingSafeIds.add(computeSafeCloudPostId(p).toLowerCase());
+        });
+
+        const recovered = [];
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          if (!d || d.isArchived === true || d.permanentAnchor === false) return;
+          const docKeyLower = String(docSnap.id || '').trim().toLowerCase();
+          const rawId = String(d.id || docSnap.id || '').trim();
+          const rawIdLower = rawId.toLowerCase();
+          const compositeLower = String((d.title || '') + '_' + (d.dateIso || '')).trim().toLowerCase();
+
+          if (deletedSet.has(rawIdLower) || deletedSet.has(docKeyLower) || (!rawIdLower && deletedSet.has(compositeLower))) {
+            return;
+          }
+          if (existingIds.has(rawIdLower) || existingSafeIds.has(docKeyLower)) {
+            return;
+          }
+
+          const updMs = getPostTimestampMs(d.updatedAt);
+          const recoveredPost = {
+            id: rawId,
+            title: String(d.title || ''),
+            date: String(d.date || ''),
+            dateIso: String(d.dateIso || ''),
+            image: String(d.image || ''),
+            imageCaption: String(d.imageCaption || ''),
+            imageFit: String(d.imageFit || 'cover-center'),
+            imageAura: String(d.imageAura || ''),
+            hidden: Boolean(d.hidden),
+            preview: String(d.preview || ''),
+            content: String(d.content || ''),
+            ...(updMs > 0 ? { updatedAt: new Date(updMs).toISOString() } : {})
+          };
+          lastSyncedPostSignatures.set(computeSafeCloudPostId(recoveredPost), computePostCloudSignature(recoveredPost));
+          recovered.push(recoveredPost);
+        });
+
+        if (recovered.length > 0) {
+          const merged = sortPostsNewestFirst(deduplicatePosts([...currentList, ...recovered])).slice(0, 500);
+          window.postsData = merged;
+          try {
+            localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(merged));
+            if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+              BlutuVault.savePosts(merged);
+            }
+          } catch (e) {}
+          if (typeof window.applyAllSectionsChangesToDOM === 'function' && !window.isAdminMode) {
+            window.applyAllSectionsChangesToDOM();
+          } else if (typeof window.reconcileAndMergePosts === 'function') {
+            window.reconcileAndMergePosts(merged);
+          }
+          // Sanar automáticamente el documento principal en Firestore para visitantes solo cuando faltaba algún blog
+          await persistSiteDataInRealtime(true, { allowAuthPopup: false, fromAutoFlush: true });
+        }
+      } catch (err) {
+        // Silencioso si está sin red
+      }
+    }
+
+    async function executeSingleSiteDataPersist(silent = false, options = {}) {
+      const syncStartMs = Date.now();
+      const allowAuthPopup = options && typeof options.allowAuthPopup === 'boolean' ? options.allowAuthPopup : !silent;
+      const customSuccessToast = (options && options.customSuccessToast) || '';
+      const isAuthorizedSessionIntent = Boolean(window.isAdminMode || window.isUserAdmin || (options && options.fromAutoFlush));
+
+      if (window.isAdminMode && !window.__isRevertingAdminSession && !(options && options.fromAutoFlush)) {
         window.__adminCloudTouchedDuringSession = true;
       }
       if (typeof window.flushAllPendingLocalCaches === 'function') {
         window.flushAllPendingLocalCaches();
       }
-      if (!silent && typeof window.showToastNotification === 'function') {
-        window.showToastNotification('💾 Sincronizando cambios en tiempo real...');
-      }
+      flushPendingCloudSyncQueueToStorage();
 
-      let activePosts = deduplicatePosts(Array.isArray(window.postsData) ? window.postsData : window.postsData).slice(0, 500);
-      if (activePosts.length === 0 && Array.isArray(window.postsData) && window.postsData.length > 0) {
-        activePosts = deduplicatePosts(window.postsData).slice(0, 500);
-      }
-      window.postsData = activePosts;
+      const pendingPostsBefore = getPendingCloudSyncPosts();
+      let activePosts = deduplicatePosts([
+        ...(Array.isArray(window.postsData) ? window.postsData : []),
+        ...pendingPostsBefore
+      ]).slice(0, 500);
       window.postsData = activePosts;
 
       const activeGamesData = (window.gamesData && typeof window.gamesData === 'object')
@@ -1546,8 +1769,10 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         : (typeof window.gamesData !== 'undefined' ? window.gamesData : {});
       window.gamesData = activeGamesData;
 
-      const payload = {
-        posts: activePosts,
+      const deletedIdsArray = Array.from(getDeletedPostIdsSet()).slice(0, 500);
+
+      const buildSitePayload = (postsForPayload) => ({
+        posts: postsForPayload,
         galleries: (window.galleriesData && typeof window.galleriesData === 'object') ? window.galleriesData : {},
         galleryOrder: ((typeof window.getOrderedGalleryKeys === 'function') ? window.getOrderedGalleryKeys() : ['fotos', 'julianaqudateotroda']).slice(0, 50),
         live: {
@@ -1562,53 +1787,130 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
           isVisible: !!window.isMerchSectionVisible,
           description: typeof window.merchSectionDescription === 'string' ? window.merchSectionDescription : ''
         },
+        // Evitar duplicar gamesData en buzon Y muro para mantener site_data/main muy por debajo de 1 MiB
         buzon: {
           isVisible: !!window.isBuzonSectionVisible,
-          gamesVisible: window.isGamesSectionVisible !== false,
-          hiddenCommentIds: Array.isArray(window.hiddenCommentIds) ? window.hiddenCommentIds : [],
-          gamesData: activeGamesData
+          gamesVisible: window.isGamesSectionVisible !== false
         },
         muro: {
           isVisible: !!window.isBuzonSectionVisible,
           gamesVisible: window.isGamesSectionVisible !== false,
           hiddenCommentIds: Array.isArray(window.hiddenCommentIds) ? window.hiddenCommentIds : [],
+          deletedPostIds: deletedIdsArray,
           gamesData: activeGamesData
         },
         updatedAt: serverTimestamp()
-      };
+      });
 
-      const localSig = computeSiteContentSignature(payload);
+      let payload = buildSitePayload(activePosts);
+      let localSig = computeSiteContentSignature(payload);
       lastLocalPersistedContentSig = localSig;
       lastKnownSiteContentSig = localSig;
 
+      // Identificar publicaciones nuevas o modificadas para asegurarlas en la cola duradera antes de red
+      const modifiedPostsLocal = activePosts.filter(p => {
+        if (!p || p.isArchived) return false;
+        const safeId = computeSafeCloudPostId(p);
+        const sig = computePostCloudSignature(p);
+        return lastSyncedPostSignatures.get(safeId) !== sig;
+      });
+      if (isAuthorizedSessionIntent && !window.__isRevertingAdminSession) {
+        if (modifiedPostsLocal.length > 0) {
+          markPostsPendingCloudSync(modifiedPostsLocal, { immediate: true });
+        }
+        if (localSig !== lastCloudConfirmedSiteSig) {
+          markSitePatchPendingCloudSync(localSig);
+        }
+      }
+
+      // Persistir en almacenamiento local solo cuando cambió respecto al último volcado local
       try {
-        localStorage.setItem('blutu_games_data', JSON.stringify(activeGamesData));
-        localStorage.setItem('blutu_live_site_data', JSON.stringify({
-          ...payload,
-          updatedAt: Date.now()
-        }));
-        localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(activePosts));
-        if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
-          BlutuVault.savePosts(activePosts);
+        const nextPostsQuickSig = computePostsQuickSignature(activePosts);
+        if (localSig !== lastSavedLocalSiteStorageSig) {
+          lastSavedLocalSiteStorageSig = localSig;
+          localStorage.setItem('blutu_games_data', JSON.stringify(activeGamesData));
+          localStorage.setItem('blutu_live_site_data', JSON.stringify({
+            ...payload,
+            updatedAt: Date.now()
+          }));
+        }
+        if (nextPostsQuickSig !== lastSavedLocalPostsQuickSig) {
+          lastSavedLocalPostsQuickSig = nextPostsQuickSig;
+          localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(activePosts));
+          if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+            BlutuVault.savePosts(activePosts);
+          }
         }
       } catch (e) {
         console.warn('Error guardando caché local de datos:', e);
       }
 
-      if (!db) {
+      // Si el estado exacto ya está confirmado en Firestore y no hay blogs modificados, evitar escrituras redundantes al servidor
+      if (localSig === lastCloudConfirmedSiteSig && modifiedPostsLocal.length === 0 && !window.__isRevertingAdminSession) {
+        clearPostsPendingCloudSync(activePosts, syncStartMs);
+        clearSitePatchPendingCloudSync(localSig);
         if (!silent && typeof window.showToastNotification === 'function') {
-          window.showToastNotification('⚠️ Base de datos no conectada. Cambios guardados localmente.', true);
+          window.showToastNotification(customSuccessToast || '✨ ¡Todos los cambios ya están sincronizados en la nube!');
+        }
+        return true;
+      }
+
+      if (!silent && typeof window.showToastNotification === 'function') {
+        window.showToastNotification('💾 Sincronizando cambios en la nube...');
+      }
+
+      if (!db) {
+        if (typeof window.showToastNotification === 'function') {
+          window.showToastNotification('⚠️ Sin conexión a la base de datos. Tu cambio quedó protegido localmente y se subirá al reconectar.', true);
         }
         return false;
       }
 
+      window.__pendingCloudSaveCount = (Number(window.__pendingCloudSaveCount) || 0) + 1;
       try {
-        await ensureAdminSignedIn(!silent);
+        const isSignedInAsAdmin = await ensureAdminSignedIn(allowAuthPopup);
+        if (!isSignedInAsAdmin) {
+          const nowMs = Date.now();
+          if (window.isAdminMode && typeof window.showToastNotification === 'function' && (nowMs - lastMissingAuthToastTime > 3500 || !silent)) {
+            lastMissingAuthToastTime = nowMs;
+            window.showToastNotification('⚠️ Guardado en este dispositivo. Inicia sesión con Google para respaldarlo permanentemente en la nube.', true);
+          }
+          return false;
+        }
 
-        // 1. Guardar documento principal del sitio
-        await setDoc(doc(db, 'site_data', 'main'), payload);
+        // Protección anti-sobrescritura en arranque frío (ej. navegador nuevo o incógnito que edita antes de recibir onSnapshot)
+        if (!hasHydratedRemoteSiteData && !window.__isRevertingAdminSession) {
+          try {
+            let remoteSnap = null;
+            try {
+              remoteSnap = await getDocFromServer(doc(db, 'site_data', 'main'));
+            } catch (srvErr) {
+              remoteSnap = await getDoc(doc(db, 'site_data', 'main'));
+            }
+            if (remoteSnap && remoteSnap.exists()) {
+              markRemoteSiteDataHydrated();
+              const remoteData = remoteSnap.data() || {};
+              if (Array.isArray(remoteData.posts) && remoteData.posts.length > 0) {
+                activePosts = deduplicatePosts([...activePosts, ...remoteData.posts]).slice(0, 500);
+                window.postsData = activePosts;
+                payload = buildSitePayload(activePosts);
+                localSig = computeSiteContentSignature(payload);
+                lastLocalPersistedContentSig = localSig;
+                lastKnownSiteContentSig = localSig;
+                try {
+                  localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(activePosts));
+                  if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+                    BlutuVault.savePosts(activePosts);
+                  }
+                } catch (e) {}
+              }
+            }
+          } catch (preHydrateErr) {
+            // Si está temporalmente offline, continuar e intentar escritura normal
+          }
+        }
 
-        // 2. Sincronizar únicamente las publicaciones nuevas o modificadas (evita tormenta N*2 de escrituras)
+        // 1. ANCLAR PRIMERO cada publicación nueva o modificada en su propio documento individual (/blog_posts/{safeId})
         const modifiedPosts = activePosts.filter(p => {
           if (!p || p.isArchived) return false;
           const safeId = computeSafeCloudPostId(p);
@@ -1620,6 +1922,27 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
           await Promise.allSettled(
             modifiedPosts.map(p => persistSingleBlogPostToCloud(p, { writeBackupDoc: false }))
           );
+        }
+
+        // 2. Verificar que el tamaño del documento site_data/main esté por debajo del límite de 1 MiB de Firestore
+        if (localSig !== lastCloudConfirmedSiteSig || window.__isRevertingAdminSession) {
+          const checkPayloadSize = estimateFirestoreJsonBytes({ ...payload, updatedAt: Date.now() });
+          if (checkPayloadSize > 980000) {
+            console.warn('Advertencia: site_data/main se acerca al límite de 1 MiB:', checkPayloadSize);
+          }
+
+          // 3. Guardar documento principal del sitio
+          await setDoc(doc(db, 'site_data', 'main'), payload);
+          lastCloudConfirmedSiteSig = localSig;
+        }
+        markRemoteSiteDataHydrated();
+
+        // 4. Confirmado en la nube: limpiar elementos sincronizados de la cola pendiente
+        clearPostsPendingCloudSync(activePosts, syncStartMs);
+        clearSitePatchPendingCloudSync(localSig);
+
+        // 5. Actualizar respaldo maestro de blogs cuando hubo cambios en publicaciones
+        if (modifiedPosts.length > 0) {
           try {
             const lastSavedId = computeSafeCloudPostId(modifiedPosts[modifiedPosts.length - 1]);
             await setDoc(doc(db, 'blog_backups', 'latest_posts_backup'), {
@@ -1631,24 +1954,71 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         }
 
         if (!silent && typeof window.showToastNotification === 'function') {
-          window.showToastNotification('✨ ¡Todos los cambios han sido aplicados y guardados permanentemente!');
+          window.showToastNotification(customSuccessToast || '✨ ¡Todos los cambios han sido aplicados y guardados permanentemente!');
         }
         return true;
       } catch (err) {
-        const isPerm = err && err.message && err.message.includes('permission');
+        const errMsgStr = (err && err.message) ? String(err.message) : '';
+        const isPerm = /permission/i.test(errMsgStr);
+        const isSize = /exceeds the maximum allowed size|larger than 1048576|too large/i.test(errMsgStr);
         if (isPerm) {
           logFirestoreErrorInfo(err, 'write', 'site_data/main');
         } else {
           console.error('Error guardando datos en Firestore:', err);
         }
-        if (!silent && typeof window.showToastNotification === 'function') {
-          const errMsg = isPerm
-            ? '⛔ Permiso denegado: inicia sesión con Google como administrador para guardar en la nube.'
-            : '⚠️ Guardado localmente. Error al sincronizar con Firestore.';
+        if (typeof window.showToastNotification === 'function' && (!silent || window.isAdminMode)) {
+          let errMsg = '⚠️ Guardado en este dispositivo. Se reintentará sincronizar con la nube automáticamente.';
+          if (isPerm) {
+            errMsg = '⛔ Permiso denegado: inicia sesión con tu cuenta Google de administrador para guardar en la nube.';
+          } else if (isSize) {
+            errMsg = '⚠️ El contenido supera el límite de tamaño de la nube (1 MB). Usa enlaces URL para imágenes muy pesadas.';
+          }
           window.showToastNotification(errMsg, true);
         }
         return false;
+      } finally {
+        window.__pendingCloudSaveCount = Math.max(0, (Number(window.__pendingCloudSaveCount) || 1) - 1);
       }
+    }
+
+    // Coalescencia single-flight: evita ráfagas de escrituras paralelas al servidor si se pulsa Guardar varias veces seguidas
+    function persistSiteDataInRealtime(silent = false, options = {}) {
+      if (inFlightSitePersistPromise) {
+        if (!queuedSitePersistRequest) {
+          queuedSitePersistRequest = {
+            silent: Boolean(silent),
+            options: { ...(options || {}) }
+          };
+        } else {
+          queuedSitePersistRequest.silent = queuedSitePersistRequest.silent && Boolean(silent);
+          queuedSitePersistRequest.options = {
+            ...queuedSitePersistRequest.options,
+            ...(options || {}),
+            allowAuthPopup: Boolean(
+              (queuedSitePersistRequest.options && queuedSitePersistRequest.options.allowAuthPopup) ||
+              (options && options.allowAuthPopup) ||
+              !silent
+            ),
+            customSuccessToast: (options && options.customSuccessToast) || (queuedSitePersistRequest.options && queuedSitePersistRequest.options.customSuccessToast) || ''
+          };
+        }
+        return inFlightSitePersistPromise;
+      }
+
+      const runLoop = async (initialSilent, initialOptions) => {
+        let result = await executeSingleSiteDataPersist(initialSilent, initialOptions);
+        while (queuedSitePersistRequest) {
+          const nextReq = queuedSitePersistRequest;
+          queuedSitePersistRequest = null;
+          result = await executeSingleSiteDataPersist(nextReq.silent, nextReq.options);
+        }
+        return result;
+      };
+
+      inFlightSitePersistPromise = runLoop(silent, options).finally(() => {
+        inFlightSitePersistPromise = null;
+      });
+      return inFlightSitePersistPromise;
     }
     window.persistSiteDataInRealtime = persistSiteDataInRealtime;
 
@@ -1663,106 +2033,144 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
         // Sembrar firmas iniciales desde el estado ya hidratado en memoria para evitar re-render redundante
         const initialSnapState = buildCurrentMemorySiteSnapshot();
         lastKnownSiteContentSig = computeSiteContentSignature(initialSnapState);
+        lastSavedLocalPostsQuickSig = computePostsQuickSignature(Array.isArray(initialSnapState.posts) ? initialSnapState.posts : []);
         seedSyncedPostSignatures(initialSnapState.posts);
 
         const siteDocRef = doc(db, 'site_data', 'main');
         window.__siteDataRealtimeUnsubscribe = onSnapshot(siteDocRef, (snap) => {
-          if (!snap.exists()) return;
+          if (!snap.exists()) {
+            markRemoteSiteDataHydrated();
+            return;
+          }
+          markRemoteSiteDataHydrated();
 
           const data = snap.data();
+          const buzonOrMuro = data.muro || data.buzon;
+
+          // Sincronizar eliminaciones intencionales desde la nube (respetando blogs recién creados localmente pendientes de subir)
+          const pendingLocalPosts = getPendingCloudSyncPosts();
+          const pendingLocalIdSet = new Set(
+            pendingLocalPosts.map(p => String((p && p.id) || '').trim().toLowerCase()).filter(Boolean)
+          );
+          if (buzonOrMuro && Array.isArray(buzonOrMuro.deletedPostIds) && buzonOrMuro.deletedPostIds.length > 0) {
+            const safeRemoteDeleted = buzonOrMuro.deletedPostIds.filter(rawId => {
+              const norm = String(rawId || '').trim().toLowerCase();
+              return norm && !pendingLocalIdSet.has(norm);
+            });
+            if (safeRemoteDeleted.length > 0) {
+              markPostIdsDeleted(safeRemoteDeleted);
+            }
+          }
+
           if (Array.isArray(data.posts)) {
             seedSyncedPostSignatures(data.posts);
           }
 
           const incomingContentSig = computeSiteContentSignature(data);
+          if (!snap.metadata || !snap.metadata.hasPendingWrites) {
+            lastCloudConfirmedSiteSig = incomingContentSig;
+          }
           if (incomingContentSig === lastKnownSiteContentSig || incomingContentSig === lastLocalPersistedContentSig) {
             lastKnownSiteContentSig = incomingContentSig;
             return;
           }
           lastKnownSiteContentSig = incomingContentSig;
 
+          // Si hay una escritura en vuelo o cambios locales pendientes de nube, NUNCA sobrescribir secciones editadas localmente
+          const hasUnsyncedSite = hasPendingCloudSyncChanges() || (Number(window.__pendingCloudSaveCount) || 0) > 0;
+
           if (data.posts && Array.isArray(data.posts) && data.posts.length > 0) {
-            const cleanIncoming = deduplicatePosts(data.posts);
-            window.postsData = cleanIncoming;
-            try {
-              localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(cleanIncoming));
-              if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
-                BlutuVault.savePosts(cleanIncoming);
-              }
-            } catch (e) {}
-          }
-          if (data.galleries && typeof data.galleries === 'object') {
-            window.galleriesData = data.galleries;
-          }
-          if (data.galleryOrder && Array.isArray(data.galleryOrder)) {
-            window.galleryOrder = data.galleryOrder;
-          }
-          if (data.live) {
-            if (Array.isArray(data.live.buttons)) window.liveButtonsData = data.live.buttons;
-            if (typeof data.live.isVisible === 'boolean') window.isLiveSectionVisible = data.live.isVisible;
-            if (typeof data.live.description === 'string') window.liveSectionDescription = data.live.description;
-          }
-          if (data.merch) {
-            if (Array.isArray(data.merch.items)) window.merchItemsData = data.merch.items;
-            if (Array.isArray(data.merch.categories)) window.merchCategories = data.merch.categories;
-            if (data.merch.cartConfig && typeof data.merch.cartConfig === 'object') {
-              window.cartConfig = { ...window.cartConfig, ...data.merch.cartConfig };
-            }
-            if (typeof data.merch.isVisible === 'boolean') window.isMerchSectionVisible = data.merch.isVisible;
-            if (typeof data.merch.description === 'string') window.merchSectionDescription = data.merch.description;
-          }
-          const buzonOrMuro = data.muro || data.buzon;
-          if (buzonOrMuro) {
-            if (typeof buzonOrMuro.isVisible === 'boolean') window.isBuzonSectionVisible = buzonOrMuro.isVisible;
-            if (typeof buzonOrMuro.gamesVisible === 'boolean') {
-              window.isGamesSectionVisible = buzonOrMuro.gamesVisible;
+            const mergedIncoming = pendingLocalPosts.length > 0
+              ? deduplicatePosts([...pendingLocalPosts, ...data.posts])
+              : deduplicatePosts(data.posts);
+            const nextIncomingQuickSig = computePostsQuickSignature(mergedIncoming);
+            window.postsData = mergedIncoming;
+            if (nextIncomingQuickSig !== lastSavedLocalPostsQuickSig) {
+              lastSavedLocalPostsQuickSig = nextIncomingQuickSig;
               try {
-                localStorage.setItem('blutu_games_visible', String(window.isGamesSectionVisible));
-              } catch (e) {}
-            }
-            if (Array.isArray(buzonOrMuro.hiddenCommentIds)) window.hiddenCommentIds = buzonOrMuro.hiddenCommentIds;
-            if (buzonOrMuro.gamesData && typeof buzonOrMuro.gamesData === 'object') {
-              window.gamesData = (typeof window.normalizeGamesData === 'function')
-                ? window.normalizeGamesData(buzonOrMuro.gamesData)
-                : buzonOrMuro.gamesData;
-              try {
-                localStorage.setItem('blutu_games_data', JSON.stringify(window.gamesData));
+                localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(mergedIncoming));
+                if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
+                  BlutuVault.savePosts(mergedIncoming);
+                }
               } catch (e) {}
             }
           }
 
-          try {
-            localStorage.setItem('blutu_live_site_data', JSON.stringify({
-              posts: window.postsData,
-              galleries: window.galleriesData,
-              galleryOrder: window.galleryOrder,
-              live: {
-                buttons: window.liveButtonsData,
-                isVisible: window.isLiveSectionVisible,
-                description: window.liveSectionDescription
-              },
-              merch: {
-                items: window.merchItemsData,
-                categories: window.merchCategories,
-                cartConfig: window.cartConfig,
-                isVisible: window.isMerchSectionVisible,
-                description: window.merchSectionDescription
-              },
-              buzon: {
-                isVisible: window.isBuzonSectionVisible,
-                gamesVisible: window.isGamesSectionVisible,
-                hiddenCommentIds: window.hiddenCommentIds,
-                gamesData: window.gamesData
-              },
-              muro: {
-                isVisible: window.isBuzonSectionVisible,
-                gamesVisible: window.isGamesSectionVisible,
-                hiddenCommentIds: window.hiddenCommentIds,
-                gamesData: window.gamesData
-              },
-              updatedAt: Date.now()
-            }));
-          } catch (e) {}
+          if (!hasUnsyncedSite && !window.isAdminMode) {
+            if (data.galleries && typeof data.galleries === 'object') {
+              window.galleriesData = data.galleries;
+            }
+            if (data.galleryOrder && Array.isArray(data.galleryOrder)) {
+              window.galleryOrder = data.galleryOrder;
+            }
+            if (data.live) {
+              if (Array.isArray(data.live.buttons)) window.liveButtonsData = data.live.buttons;
+              if (typeof data.live.isVisible === 'boolean') window.isLiveSectionVisible = data.live.isVisible;
+              if (typeof data.live.description === 'string') window.liveSectionDescription = data.live.description;
+            }
+            if (data.merch) {
+              if (Array.isArray(data.merch.items)) window.merchItemsData = data.merch.items;
+              if (Array.isArray(data.merch.categories)) window.merchCategories = data.merch.categories;
+              if (data.merch.cartConfig && typeof data.merch.cartConfig === 'object') {
+                window.cartConfig = { ...window.cartConfig, ...data.merch.cartConfig };
+              }
+              if (typeof data.merch.isVisible === 'boolean') window.isMerchSectionVisible = data.merch.isVisible;
+              if (typeof data.merch.description === 'string') window.merchSectionDescription = data.merch.description;
+            }
+            if (buzonOrMuro) {
+              if (typeof buzonOrMuro.isVisible === 'boolean') window.isBuzonSectionVisible = buzonOrMuro.isVisible;
+              if (typeof buzonOrMuro.gamesVisible === 'boolean') {
+                window.isGamesSectionVisible = buzonOrMuro.gamesVisible;
+                try {
+                  localStorage.setItem('blutu_games_visible', String(window.isGamesSectionVisible));
+                } catch (e) {}
+              }
+              if (Array.isArray(buzonOrMuro.hiddenCommentIds)) window.hiddenCommentIds = buzonOrMuro.hiddenCommentIds;
+              if (buzonOrMuro.gamesData && typeof buzonOrMuro.gamesData === 'object') {
+                window.gamesData = (typeof window.normalizeGamesData === 'function')
+                  ? window.normalizeGamesData(buzonOrMuro.gamesData)
+                  : buzonOrMuro.gamesData;
+                try {
+                  localStorage.setItem('blutu_games_data', JSON.stringify(window.gamesData));
+                } catch (e) {}
+              }
+            }
+          }
+
+          if (incomingContentSig !== lastSavedLocalSiteStorageSig) {
+            lastSavedLocalSiteStorageSig = incomingContentSig;
+            try {
+              localStorage.setItem('blutu_live_site_data', JSON.stringify({
+                posts: window.postsData,
+                galleries: window.galleriesData,
+                galleryOrder: window.galleryOrder,
+                live: {
+                  buttons: window.liveButtonsData,
+                  isVisible: window.isLiveSectionVisible,
+                  description: window.liveSectionDescription
+                },
+                merch: {
+                  items: window.merchItemsData,
+                  categories: window.merchCategories,
+                  cartConfig: window.cartConfig,
+                  isVisible: window.isMerchSectionVisible,
+                  description: window.merchSectionDescription
+                },
+                buzon: {
+                  isVisible: window.isBuzonSectionVisible,
+                  gamesVisible: window.isGamesSectionVisible
+                },
+                muro: {
+                  isVisible: window.isBuzonSectionVisible,
+                  gamesVisible: window.isGamesSectionVisible,
+                  hiddenCommentIds: window.hiddenCommentIds,
+                  deletedPostIds: Array.from(getDeletedPostIdsSet()).slice(0, 500),
+                  gamesData: window.gamesData
+                },
+                updatedAt: Date.now()
+              }));
+            } catch (e) {}
+          }
 
           const activeEl = document.activeElement;
           const isAnyAdminModalOpen = typeof window.isAdminMode !== 'undefined' && window.isAdminMode && (
