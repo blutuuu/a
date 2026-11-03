@@ -63,6 +63,10 @@ export function destroyActiveMiniGame(keepAudioAlive = false) {
       clearTimeout(activeMiniGame.wrongTapTimeout);
       activeMiniGame.wrongTapTimeout = null;
     }
+    if (activeMiniGame.finishTimer) {
+      clearTimeout(activeMiniGame.finishTimer);
+      activeMiniGame.finishTimer = null;
+    }
     setActiveMiniGame(null);
   }
   if (!keepAudioAlive) {
@@ -78,6 +82,9 @@ export function launchMiniGameFromBlog(gameType, mode) {
   const alreadyPlayingMusic = isSharedGameMusicActive();
   destroyActiveMiniGame(alreadyPlayingMusic);
   window.__isMiniGameScreenOpen = true;
+  if (typeof window.clearActiveBatParticles === "function") {
+    window.clearActiveBatParticles();
+  }
 
   const modalEl = document.getElementById("blogReadModal");
   const modalBox = document.querySelector("#blogReadModal .blog-modal-box");
@@ -326,8 +333,8 @@ function recordMemoramaSeenCard(game, cardIndex) {
   }
   game.seenMemory.set(cardIndex, pairId);
 
-  // En Fácil la PC recuerda muy pocas cartas recientes; en Difícil tiene memoria aguda
-  const maxMemory = game.isVsPcEasy ? 3 : 9;
+  // En Fácil la PC recuerda hasta 7 cartas recientes (desafiante pero humano); en Difícil tiene memoria aguda de 11 cartas
+  const maxMemory = game.isVsPcEasy ? 7 : 11;
   while (game.seenMemory.size > maxMemory) {
     const oldestKey = game.seenMemory.keys().next().value;
     game.seenMemory.delete(oldestKey);
@@ -429,10 +436,19 @@ function flipMemoramaCardInternal(game, idx) {
       const totalMatched = game.userPairs + game.pcPairs;
       if (totalMatched >= 10) {
         const finalElapsed = performance.now() - game.startTime;
-        game.mismatchTimeout = setTimeout(() => {
+        if (game.rafId) {
+          cancelAnimationFrame(game.rafId);
+          game.rafId = null;
+        }
+        const timerEl = document.getElementById("memHudTimer");
+        if (timerEl) timerEl.textContent = formatMemoramaTime(finalElapsed);
+        const gridDoneEl = document.getElementById("memoramaGridEl");
+        if (gridDoneEl) gridDoneEl.classList.add("is-board-complete");
+
+        game.finishTimer = setTimeout(() => {
           if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
           finishMemoramaMatch(game, finalElapsed);
-        }, 340);
+        }, 1150);
         return;
       }
 
@@ -467,7 +483,7 @@ function flipMemoramaCardInternal(game, idx) {
 }
 
 function findKnownPairInMemory(game) {
-  if (game.isVsPcEasy && Math.random() > 0.28) {
+  if (game.isVsPcEasy && Math.random() > 0.68) {
     return null;
   }
   const byPair = new Map();
@@ -483,7 +499,7 @@ function findKnownPairInMemory(game) {
 }
 
 function findMatchingCardInMemory(game, targetPairId, excludeIdx) {
-  if (game.isVsPcEasy && Math.random() > 0.32) {
+  if (game.isVsPcEasy && Math.random() > 0.78) {
     return -1;
   }
   for (const [cardIdx, pairId] of game.seenMemory.entries()) {
@@ -517,7 +533,8 @@ function schedulePcMemoramaTurn(game, delayMs) {
       plannedSecondPick = knownPair[1];
     } else {
       const unknownIndices = unmatchedIndices.filter(idx => !game.seenMemory.has(idx));
-      const pool = (!game.isVsPcEasy && unknownIndices.length > 0) ? unknownIndices : unmatchedIndices;
+      const preferUnknown = !game.isVsPcEasy || Math.random() < 0.75;
+      const pool = (preferUnknown && unknownIndices.length > 0) ? unknownIndices : unmatchedIndices;
       firstPick = pool[Math.floor(Math.random() * pool.length)];
     }
 
@@ -533,7 +550,8 @@ function schedulePcMemoramaTurn(game, delayMs) {
         } else {
           const remaining = unmatchedIndices.filter(idx => idx !== firstPick && !game.deck[idx].matched);
           const remainingUnknown = remaining.filter(idx => !game.seenMemory.has(idx));
-          const pool2 = (!game.isVsPcEasy && remainingUnknown.length > 0) ? remainingUnknown : remaining;
+          const preferUnknown2 = !game.isVsPcEasy || Math.random() < 0.75;
+          const pool2 = (preferUnknown2 && remainingUnknown.length > 0) ? remainingUnknown : remaining;
           secondPick = pool2[Math.floor(Math.random() * pool2.length)];
         }
       }
@@ -542,6 +560,44 @@ function schedulePcMemoramaTurn(game, delayMs) {
       }
     }, 520);
   }, delayMs);
+}
+
+function buildGothicBatSvgHTML() {
+  return `<svg class="minigame-win-bat-svg" viewBox="0 0 64 36" aria-hidden="true" focusable="false">
+    <g class="minigame-bat-wing-l"><path d="M30 19 C23 9, 11 4, 1 11 C7 13, 10 17, 9 22 C15 19, 19 21, 21 25 C25 22, 28 22, 30 23 Z"/></g>
+    <g class="minigame-bat-wing-r"><path d="M34 19 C41 9, 53 4, 63 11 C57 13, 54 17, 55 22 C49 19, 45 21, 43 25 C39 22, 36 22, 34 23 Z"/></g>
+    <path class="minigame-bat-body" d="M29.5 14 L28 9 L31 12.5 L33 12.5 L36 9 L34.5 14 C35.5 18, 35 23, 32 27 C29 23, 28.5 18, 29.5 14 Z"/>
+  </svg>`;
+}
+
+function buildVictoryBatsBackdropHTML() {
+  const specs = [
+    { dir: "ltr", top: "14%", size: "38px", dur: "4.4s", delay: "0s", drift: "-26px", flap: "0.26s" },
+    { dir: "rtl", top: "24%", size: "30px", dur: "3.9s", delay: "0.35s", drift: "-18px", flap: "0.22s" },
+    { dir: "ltr", top: "38%", size: "44px", dur: "4.9s", delay: "0.75s", drift: "-34px", flap: "0.28s" },
+    { dir: "rtl", top: "52%", size: "34px", dur: "4.2s", delay: "0.18s", drift: "-22px", flap: "0.24s" },
+    { dir: "ltr", top: "66%", size: "28px", dur: "3.7s", delay: "1.1s", drift: "-30px", flap: "0.21s" },
+    { dir: "rtl", top: "76%", size: "42px", dur: "4.7s", delay: "0.6s", drift: "-28px", flap: "0.27s" },
+    { dir: "ltr", top: "28%", size: "26px", dur: "3.6s", delay: "1.55s", drift: "-20px", flap: "0.2s" },
+    { dir: "rtl", top: "44%", size: "40px", dur: "4.6s", delay: "1.35s", drift: "-32px", flap: "0.25s" },
+    { dir: "ltr", top: "82%", size: "32px", dur: "4.1s", delay: "1.85s", drift: "-24px", flap: "0.23s" },
+    { dir: "rtl", top: "18%", size: "35px", dur: "4.5s", delay: "2.15s", drift: "-26px", flap: "0.25s" }
+  ];
+  const svg = buildGothicBatSvgHTML();
+  const batsHTML = specs.map((s) => (
+    `<span class="minigame-win-bat is-${s.dir}" style="--bat-top:${s.top};--bat-size:${s.size};--bat-dur:${s.dur};--bat-delay:${s.delay};--bat-drift:${s.drift};--bat-flap:${s.flap};">${svg}</span>`
+  )).join("");
+  return `<div class="minigame-win-bats-layer" aria-hidden="true">${batsHTML}</div>`;
+}
+
+function buildResultCardCrestHTML() {
+  return `
+    <div class="minigame-card-crest" aria-hidden="true">
+      <span class="minigame-crest-line"></span>
+      <img src="blutu_logo.png" alt="" class="minigame-crest-logo" decoding="async">
+      <span class="minigame-crest-line"></span>
+    </div>
+  `;
 }
 
 function finishMemoramaMatch(game, elapsedMs) {
@@ -565,47 +621,80 @@ function finishMemoramaMatch(game, elapsedMs) {
   const backStyle = btnStyleAttr(normHex(mem.backBtnColor || "#1f2b4d"));
 
   const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+  const crestHTML = buildResultCardCrestHTML();
 
   if (mode === "solo") {
     const timeStr = formatMemoramaTime(elapsedMs);
+    const batsHTML = buildVictoryBatsBackdropHTML();
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
-      <div class="minigame-result-panel">
-        <h2 class="minigame-result-title">${escapeTxt(timeStr)}</h2>
-        <div class="minigame-result-buttons">
-          <div class="minigame-result-primary-row">
-            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Reintentar</button>
-            <button type="button" class="game-custom-btn" style="${vsPcStyle}" onclick="toggleMemoramaVsPcDifficultyRow('soloResultVsPcDiffRow')">Vs PC</button>
+      <div class="minigame-result-stage is-win-stage">
+        ${batsHTML}
+        <div class="minigame-result-card is-victory">
+          ${crestHTML}
+          <span class="minigame-result-kicker">Memorama · Solo</span>
+          <h2 class="minigame-result-title is-time-score">${escapeTxt(timeStr)}</h2>
+          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          <div class="minigame-result-buttons">
+            <div class="minigame-result-primary-row">
+              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Reintentar</button>
+              <button type="button" class="game-custom-btn" style="${vsPcStyle}" onclick="toggleMemoramaVsPcDifficultyRow('soloResultVsPcDiffRow')">Vs PC</button>
+            </div>
+            <div id="soloResultVsPcDiffRow" class="game-blog-vspc-subrow" style="display:none;">
+              <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcEasyStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
+              <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcHardStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
+            </div>
+            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
-          <div id="soloResultVsPcDiffRow" class="game-blog-vspc-subrow" style="display:none;">
-            <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcEasyStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
-            <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcHardStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
-          </div>
-          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
         </div>
       </div>
     `;
   } else {
     let outcomeTitle = "Empate";
-    if (userPairs > pcPairs) outcomeTitle = "Tú ganas";
-    else if (pcPairs > userPairs) outcomeTitle = "PC gana";
+    let cardTone = "is-neutral";
+    const didUserWin = userPairs > pcPairs;
+    if (didUserWin) {
+      outcomeTitle = "Tú ganas";
+      cardTone = "is-victory";
+    } else if (pcPairs > userPairs) {
+      outcomeTitle = "PC gana";
+      cardTone = "is-defeat";
+    }
 
+    const currentDiffLabel = mode === "vspc-easy" ? "Fácil" : "Difícil";
     const otherVsMode = mode === "vspc-easy" ? "vspc-hard" : "vspc-easy";
     const otherVsLabel = mode === "vspc-easy" ? "Difícil" : "Fácil";
     const otherVsStyle = mode === "vspc-easy" ? vsPcHardStyle : vsPcEasyStyle;
+    const batsHTML = didUserWin ? buildVictoryBatsBackdropHTML() : "";
 
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
-      <div class="minigame-result-panel">
-        <h2 class="minigame-result-title">${outcomeTitle}</h2>
-        <p class="minigame-result-subtitle">Tú: ${userPairs} — PC: ${pcPairs}</p>
-        <div class="minigame-result-buttons">
-          <div class="minigame-result-primary-row">
-            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', '${mode}')">Reintentar</button>
-            <button type="button" class="game-custom-btn" style="${otherVsStyle}" onclick="launchMiniGameFromBlog('memorama', '${otherVsMode}')">Vs PC ${otherVsLabel}</button>
-            <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
+      <div class="minigame-result-stage${didUserWin ? " is-win-stage" : ""}">
+        ${batsHTML}
+        <div class="minigame-result-card ${cardTone}">
+          ${crestHTML}
+          <span class="minigame-result-kicker">Memorama · Vs PC ${currentDiffLabel}</span>
+          <h2 class="minigame-result-title">${outcomeTitle}</h2>
+          <div class="minigame-duel-scoreboard">
+            <div class="minigame-duel-side${userPairs >= pcPairs ? " is-winner" : ""}">
+              <span class="minigame-duel-label">Tú</span>
+              <span class="minigame-duel-score">${userPairs}</span>
+            </div>
+            <span class="minigame-duel-sep" aria-hidden="true">✠</span>
+            <div class="minigame-duel-side${pcPairs >= userPairs ? " is-winner" : ""}">
+              <span class="minigame-duel-label">PC</span>
+              <span class="minigame-duel-score">${pcPairs}</span>
+            </div>
           </div>
-          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          <div class="minigame-result-buttons">
+            <div class="minigame-result-primary-row">
+              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', '${mode}')">Reintentar</button>
+              <button type="button" class="game-custom-btn" style="${otherVsStyle}" onclick="launchMiniGameFromBlog('memorama', '${otherVsMode}')">Vs PC ${otherVsLabel}</button>
+              <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
+            </div>
+            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+          </div>
         </div>
       </div>
     `;
@@ -724,7 +813,7 @@ function startSixBySixRuntime(mode) {
   }
 
   const tickSix = (now) => {
-    if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+    if (!activeMiniGame || activeMiniGame !== game || game.destroyed || game.finishing) return;
     const remainingMs = Math.max(0, game.durationMs - (now - game.startTime));
     const timerEl = document.getElementById("sixHudTimer");
     if (timerEl) {
@@ -734,7 +823,14 @@ function startSixBySixRuntime(mode) {
     }
 
     if (remainingMs <= 0) {
-      finishSixBySixMatch(game, false);
+      game.finishing = true;
+      game.rafId = null;
+      const gridDoneEl = document.getElementById("sixBySixGridEl");
+      if (gridDoneEl) gridDoneEl.classList.add("is-board-complete");
+      game.finishTimer = setTimeout(() => {
+        if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+        finishSixBySixMatch(game, false);
+      }, 850);
       return;
     }
     game.rafId = requestAnimationFrame(tickSix);
@@ -744,7 +840,7 @@ function startSixBySixRuntime(mode) {
 
 export function handleSixBySixCellTap(cellIdx, num) {
   const game = activeMiniGame;
-  if (!game || game.destroyed || game.type !== "sixbysix" || game.mode !== "easy") return;
+  if (!game || game.destroyed || game.finishing || game.type !== "sixbysix" || game.mode !== "easy") return;
 
   const cellEl = document.getElementById(`sixCell_${cellIdx}`);
   if (!cellEl || cellEl.classList.contains("is-disappeared")) return;
@@ -758,7 +854,20 @@ export function handleSixBySixCellTap(cellIdx, num) {
     cellEl.innerHTML = `<img src="blutu_logo.png" alt="" class="sixbysix-cleared-logo" decoding="async">`;
 
     if (game.highestReached >= 36) {
-      finishSixBySixMatch(game, true);
+      game.finishing = true;
+      if (game.rafId) {
+        cancelAnimationFrame(game.rafId);
+        game.rafId = null;
+      }
+      const nextElDone = document.getElementById("sixHudNextNum");
+      if (nextElDone) nextElDone.textContent = "36";
+      const gridDoneEl = document.getElementById("sixBySixGridEl");
+      if (gridDoneEl) gridDoneEl.classList.add("is-board-complete");
+
+      game.finishTimer = setTimeout(() => {
+        if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+        finishSixBySixMatch(game, true);
+      }, 1100);
       return;
     }
 
@@ -777,9 +886,17 @@ export function handleSixBySixCellTap(cellIdx, num) {
 
 export function finishSixBySixHardManual() {
   const game = activeMiniGame;
-  if (!game || game.destroyed || game.type !== "sixbysix") return;
+  if (!game || game.destroyed || game.finishing || game.type !== "sixbysix") return;
   notifySharedGameUserGesture();
-  finishSixBySixMatch(game, false);
+  game.finishing = true;
+  if (game.rafId) {
+    cancelAnimationFrame(game.rafId);
+    game.rafId = null;
+  }
+  game.finishTimer = setTimeout(() => {
+    if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
+    finishSixBySixMatch(game, false);
+  }, 420);
 }
 
 function finishSixBySixMatch(game, completedAll) {
@@ -799,36 +916,52 @@ function finishSixBySixMatch(game, completedAll) {
   const backStyle = btnStyleAttr(normHex(six.backBtnColor || "#1f2b4d"));
 
   const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
+  const crestHTML = buildResultCardCrestHTML();
 
   if (mode === "easy") {
-    const titleHTML = completedAll
-      ? `<h2 class="minigame-result-title">Lo lograste</h2>`
+    const isWin = Boolean(completedAll);
+    const batsHTML = isWin ? buildVictoryBatsBackdropHTML() : "";
+    const cardTone = isWin ? "is-victory" : "is-neutral";
+    const titleHTML = isWin
+      ? `
+        <h2 class="minigame-result-title">Lo lograste</h2>
+        <div class="minigame-six-complete-badge">36</div>
+      `
       : `<h2 class="minigame-result-title is-big-score-num">${reachedNum}</h2>`;
 
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
-      <div class="minigame-result-panel">
-        ${titleHTML}
-        <div class="minigame-result-buttons">
-          <div class="minigame-result-primary-row">
-            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Reintentar</button>
-            <button type="button" class="game-custom-btn" style="${hardStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
+      <div class="minigame-result-stage${isWin ? " is-win-stage" : ""}">
+        ${batsHTML}
+        <div class="minigame-result-card ${cardTone}">
+          ${crestHTML}
+          ${titleHTML}
+          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          <div class="minigame-result-buttons">
+            <div class="minigame-result-primary-row">
+              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Reintentar</button>
+              <button type="button" class="game-custom-btn" style="${hardStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
+            </div>
+            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
-          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
         </div>
       </div>
     `;
   } else {
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
-      <div class="minigame-result-panel">
-        <h2 class="minigame-result-title">¿Hasta qué número llegaste?</h2>
-        <div class="minigame-result-buttons">
-          <div class="minigame-result-primary-row">
-            <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Reintentar</button>
-            <button type="button" class="game-custom-btn" style="${easyStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
+      <div class="minigame-result-stage">
+        <div class="minigame-result-card is-neutral">
+          ${crestHTML}
+          <h2 class="minigame-result-title is-question-title">¿Hasta qué número llegaste?</h2>
+          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          <div class="minigame-result-buttons">
+            <div class="minigame-result-primary-row">
+              <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Reintentar</button>
+              <button type="button" class="game-custom-btn" style="${easyStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
+            </div>
+            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
-          <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
         </div>
       </div>
     `;

@@ -36,6 +36,9 @@ preloadSharedGameMusicApi();
         }
       } catch (e) {}
       document.body.classList.add('blutu-egg-active');
+      if (typeof window.clearActiveBatParticles === 'function') {
+        window.clearActiveBatParticles();
+      }
 
       // Medir posición exacta del logo antes de ocultarlo para que caiga rodando desde ahí
       const logoRect = logoBtn.getBoundingClientRect();

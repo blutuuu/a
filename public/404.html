@@ -13,8 +13,7 @@
         var clean = decodeURIComponent(rawPath).replace(/^\/+|\/+$/g, '');
         if (clean && clean !== 'index.html' && clean !== '404.html') {
           try { sessionStorage.setItem('blutu_spa_route', clean); } catch (e) {}
-          window.location.replace('/?s=' + encodeURIComponent(clean));
-          return;
+          try { window.name = '__blutu_spa__:' + clean; } catch (e) {}
         }
       } catch (err) {}
       window.location.replace('/');

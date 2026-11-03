@@ -22,7 +22,7 @@ export function initFreshServerVersionCheck(getCurrentBuildTimestamp) {
   const runVersionCheck = function () {
     if (document.hidden) return;
     try {
-      const checkTarget = window.location.pathname + "?_chk=" + Date.now();
+      const checkTarget = "/index.html?_chk=" + Date.now();
       fetch(checkTarget, {
         method: "GET",
         cache: "no-store",
@@ -42,14 +42,18 @@ export function initFreshServerVersionCheck(getCurrentBuildTimestamp) {
             const localTimestamp = Number(getCurrentBuildTimestamp()) || 0;
             if (serverTimestamp > localTimestamp) {
               const tsStr = String(serverTimestamp);
-              const reloadUrl = new URL(window.location.href);
-              if (reloadUrl.searchParams.get("_v") === tsStr) return;
+              const curUrl = new URL(window.location.href);
+              if (curUrl.searchParams.get("_v") === tsStr) return;
               try {
                 if (sessionStorage.getItem("blutu_reloaded_build_ts") === tsStr) return;
                 sessionStorage.setItem("blutu_reloaded_build_ts", tsStr);
               } catch (e) {}
-              reloadUrl.searchParams.set("_v", tsStr);
-              window.location.replace(reloadUrl.toString());
+              const cleanPath = decodeURIComponent(curUrl.pathname || "/").replace(/^\/+|\/+$/g, "");
+              if (cleanPath && cleanPath !== "index.html" && cleanPath !== "404.html") {
+                try { sessionStorage.setItem("blutu_spa_route", cleanPath); } catch (e) {}
+                try { window.name = "__blutu_spa__:" + cleanPath; } catch (e) {}
+              }
+              window.location.replace("/?_v=" + encodeURIComponent(tsStr));
             }
           }
         })

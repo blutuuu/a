@@ -43,7 +43,7 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
       googleProvider = new GoogleAuthProvider();
       googleProvider.setCustomParameters({ prompt: 'select_account' });
       db = initializeFirestore(app, {
-        experimentalForceLongPolling: true
+        experimentalAutoDetectLongPolling: true
       }, firebaseConfig.firestoreDatabaseId);
     } catch (e) {
       console.error('Error inicializando Firebase:', e);
@@ -1684,7 +1684,6 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
           if (data.posts && Array.isArray(data.posts) && data.posts.length > 0) {
             const cleanIncoming = deduplicatePosts(data.posts);
             window.postsData = cleanIncoming;
-            window.postsData = cleanIncoming;
             try {
               localStorage.setItem('blutu_permanent_posts_vault', JSON.stringify(cleanIncoming));
               if (typeof BlutuVault !== 'undefined' && BlutuVault.savePosts) {
@@ -1776,6 +1775,9 @@ import { deduplicatePosts, BlutuVault } from "./vault.js";
           const isTyping = isAnyAdminModalOpen || (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable));
           if (!isTyping && typeof window.applyAllSectionsChangesToDOM === 'function') {
             window.applyAllSectionsChangesToDOM();
+          }
+          if (!isTyping && typeof window.checkPendingSharedDeepLink === 'function') {
+            window.checkPendingSharedDeepLink();
           }
         }, (err) => {
           console.warn('Realtime sync listener notice:', err);

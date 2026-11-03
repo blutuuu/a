@@ -121,6 +121,9 @@ initMobileAppDeepLinks();
       window.postsData = merged;
 
       if (nextSig === prevSig) {
+        if (isInitialScriptReady && typeof checkPendingSharedDeepLink === 'function') {
+          checkPendingSharedDeepLink();
+        }
         return;
       }
 
@@ -377,6 +380,14 @@ function destroyActiveMiniGame() {
 }
 
 function launchMiniGameFromBlog(gameType, mode) {
+  window.__isMiniGameScreenOpen = true;
+  if (typeof window.clearActiveBatParticles === "function") {
+    window.clearActiveBatParticles();
+  }
+  const modalBodyEl = document.getElementById("blogModalBody");
+  if (modalBodyEl && typeof resetBlogParagraphRevealState === "function") {
+    resetBlogParagraphRevealState(modalBodyEl);
+  }
   if (gamesEngineModuleRef && typeof gamesEngineModuleRef.launchMiniGameFromBlog === "function") {
     gamesEngineModuleRef.launchMiniGameFromBlog(gameType, mode);
     return;
@@ -385,6 +396,8 @@ function launchMiniGameFromBlog(gameType, mode) {
   ensureGamesEngineLoaded().then((mod) => {
     if (mod && typeof mod.launchMiniGameFromBlog === "function") {
       mod.launchMiniGameFromBlog(gameType, mode);
+    } else {
+      window.__isMiniGameScreenOpen = false;
     }
   });
 }
@@ -2004,12 +2017,27 @@ try {
     }
 
     let hasResolvedInitialSharedDeepLink = false;
+    function consumeStoredDeepLinkMarkers() {
+      try { sessionStorage.removeItem('blutu_spa_route'); } catch (e) {}
+      try {
+        if (typeof window.name === 'string' && window.name.indexOf('__blutu_spa__:') === 0) {
+          window.name = '';
+        }
+      } catch (e) {}
+    }
+
     const initialCapturedDeepLink = (function captureInitialDeepLinkOnce() {
       try {
         let routeFromStorage = '';
         try {
-          routeFromStorage = sessionStorage.getItem('blutu_spa_route') || '';
-          if (routeFromStorage) sessionStorage.removeItem('blutu_spa_route');
+          routeFromStorage = (sessionStorage.getItem('blutu_spa_route') || '').trim();
+        } catch (e) {}
+
+        let routeFromWinName = '';
+        try {
+          if (typeof window.name === 'string' && window.name.indexOf('__blutu_spa__:') === 0) {
+            routeFromWinName = window.name.slice('__blutu_spa__:'.length).trim();
+          }
         } catch (e) {}
 
         const params = new URLSearchParams(window.location.search || '');
@@ -2024,7 +2052,19 @@ try {
           pathSlug = rawPath;
         }
 
-        const slug = (sParam || routeFromStorage || pathSlug).replace(/^\/+|\/+$/g, '');
+        const slug = (sParam || routeFromStorage || routeFromWinName || pathSlug).replace(/^\/+|\/+$/g, '');
+
+        // Limpiar de inmediato cualquier "?s=" o "?_v=" de la barra de direcciones para que nunca quede visible
+        if (sParam || params.has('_v')) {
+          try {
+            params.delete('s');
+            params.delete('_v');
+            const rest = params.toString();
+            const cleanBase = '/' + (rest ? `?${rest}` : '') + (window.location.hash || '');
+            window.history.replaceState(null, '', cleanBase);
+          } catch (e) {}
+        }
+
         return { slug, gameParam, blogParam, merchParam };
       } catch (e) {
         return { slug: '', gameParam: '', blogParam: '', merchParam: '' };
@@ -2032,6 +2072,7 @@ try {
     })();
 
     function prepareBaseHomepageHistoryBeforeDeepLink() {
+      consumeStoredDeepLinkMarkers();
       try {
         window.history.replaceState(null, '', '/');
       } catch (e) {}
@@ -2044,8 +2085,10 @@ try {
 
       // 1. Verificar coincidencia con ruta limpia blutu.org/<slug>
       if (slug) {
-        const cleanLower = slug.toLowerCase();
-        const slugNorm = buildCleanShareSlug(slug, 'pensamiento');
+        let decodedSlug = slug;
+        try { decodedSlug = decodeURIComponent(slug); } catch (e) {}
+        const cleanLower = decodedSlug.toLowerCase().trim();
+        const slugNorm = buildCleanShareSlug(decodedSlug, 'pensamiento');
 
         // 1a. Blogs de Juegos (por-que, memorama, 6x6 o título personalizado)
         const gameAliases = {
@@ -2071,9 +2114,12 @@ try {
         }
 
         // 1b. Productos de Merch (blutu.org/merch-...)
-        if (cleanLower.startsWith('merch-')) {
+        if (cleanLower.startsWith('merch-') || slugNorm.startsWith('merch-')) {
           const mList = Array.isArray(merchItemsData) ? merchItemsData : [];
-          const mIdx = mList.findIndex((it, idx) => it && it.visible !== false && getMerchItemShareSlug(it, idx) === cleanLower);
+          const mIdx = mList.findIndex((it, idx) => it && it.visible !== false && (
+            getMerchItemShareSlug(it, idx) === cleanLower ||
+            getMerchItemShareSlug(it, idx) === slugNorm
+          ));
           if (mIdx !== -1) {
             hasResolvedInitialSharedDeepLink = true;
             prepareBaseHomepageHistoryBeforeDeepLink();
@@ -2083,12 +2129,19 @@ try {
         }
 
         // 1c. Blogs de Pensamientos (blutu.org/<slug>)
-        const list = Array.isArray(postsData) ? postsData : [];
-        const normRaw = normalizePostStr(slug);
+        const list = (Array.isArray(window.postsData) && window.postsData.length > 0)
+          ? window.postsData
+          : (Array.isArray(postsData) ? postsData : []);
+        if (list !== postsData && list.length > 0) {
+          postsData = list;
+        }
+        const normRaw = normalizePostStr(decodedSlug);
         const foundIdx = list.findIndex((p, idx) => {
           if (!p || p.hidden) return false;
-          if (getBlogPostShareSlug(p, idx) === cleanLower || getBlogPostShareSlug(p, idx) === slugNorm) return true;
-          if (String(p.id || '').trim() === slug || String(p.title || '').trim() === slug) return true;
+          const postSlug = getBlogPostShareSlug(p, idx);
+          if (postSlug === cleanLower || postSlug === slugNorm) return true;
+          if (buildCleanShareSlug(p.id || '', 'pensamiento') === slugNorm && p.id) return true;
+          if (String(p.id || '').trim() === decodedSlug || String(p.title || '').trim() === decodedSlug) return true;
           return Boolean(normRaw && (normalizePostStr(p.id) === normRaw || normalizePostStr(p.title) === normRaw));
         });
         if (foundIdx !== -1) {
@@ -2154,6 +2207,7 @@ try {
         }
       }
     }
+    window.checkPendingSharedDeepLink = checkPendingSharedDeepLink;
 
     function blogModalBgClick(event) {
       if (event.target.id === 'blogReadModal') {
@@ -2964,6 +3018,10 @@ try {
       const clean = (el.innerText || '').replace(/\r?\n/g, ' ').trim();
       galleriesData[key].title = clean;
       window.galleriesData = galleriesData;
+      const parentBtn = el.closest('.gallery-tab-btn');
+      if (parentBtn && !(typeof isAdminMode !== 'undefined' && isAdminMode)) {
+        parentBtn.title = clean || 'Galería';
+      }
     }
     window.handleInlineGalleryTabTitleInput = handleInlineGalleryTabTitleInput;
 
@@ -3088,7 +3146,8 @@ try {
       const adminActive = (typeof isAdminMode !== 'undefined' && isAdminMode);
 
       if (keys.length === 0) {
-        container.classList.remove('is-scrollable-tabs');
+        container.classList.remove('is-scrollable-tabs', 'is-compact-tabs', 'is-dense-tabs');
+        delete container.dataset.tabCount;
         currentGalleryKey = '';
         selectedAdminGalleryKey = '';
         if (delBtn) delBtn.style.display = 'none';
@@ -3124,7 +3183,10 @@ try {
       syncGalleryColorOrbsUI(galleriesData[currentGalleryKey]);
 
       const totalVisibleTabs = keys.length + (adminActive ? 1 : 0);
-      container.classList.toggle('is-scrollable-tabs', totalVisibleTabs > 3);
+      container.classList.remove('is-scrollable-tabs');
+      container.classList.toggle('is-compact-tabs', totalVisibleTabs >= 4 && totalVisibleTabs <= 6);
+      container.classList.toggle('is-dense-tabs', totalVisibleTabs >= 7);
+      container.dataset.tabCount = String(totalVisibleTabs);
 
       let draggedGalleryKey = null;
 
@@ -3137,6 +3199,7 @@ try {
         btn.className = `gallery-tab-btn ${isActive ? 'active' : ''}`;
         btn.dataset.galleryKey = key;
         btn.style.setProperty('--tab-color', tabColor);
+        btn.title = gObj.title || 'Galería';
 
         const stackWrapper = document.createElement('span');
         stackWrapper.innerHTML = buildGalleryTabStackHTML(gObj);
@@ -7080,17 +7143,21 @@ try {
 
         container.innerHTML = '';
         pageItems.forEach((btn) => {
+          const c1 = btn.color1 || '#ff0055';
+          const c2 = btn.color2 || '#7a00ff';
           const a = document.createElement('a');
           a.href = btn.url || '#';
           a.target = '_blank';
           a.rel = 'noopener';
           a.className = 'live-button-item';
-          a.style.background = `linear-gradient(135deg, ${btn.color1 || '#ff0055'}, ${btn.color2 || '#7a00ff'})`;
+          a.style.setProperty('--live-c1', c1);
+          a.style.setProperty('--live-c2', c2);
+          a.style.background = `linear-gradient(135deg, ${c1}, ${c2})`;
           a.innerHTML = `<span><span class="live-dot"></span>${escapeHtmlAttr(btn.name || 'Transmisión')}</span>`;
-          a.setAttribute('data-anim-color', btn.color1 || '#ff0055');
+          a.setAttribute('data-anim-color', c1);
 
           a.addEventListener('click', function() {
-            triggerGreekCrossAnimation(a, btn.color1 || '#ff0055', 500);
+            triggerGreekCrossAnimation(a, c1, 500);
           });
 
           container.appendChild(a);
@@ -7137,6 +7204,8 @@ try {
           a.target = '_blank';
           a.rel = 'noopener';
           a.className = 'live-button-item';
+          a.style.setProperty('--live-c1', color1);
+          a.style.setProperty('--live-c2', color2);
           a.style.background = `linear-gradient(135deg, ${color1}, ${color2})`;
           a.style.cursor = 'pointer';
           a.title = 'Haz clic para desplegar u ocultar el menú de edición de este botón';
@@ -9373,6 +9442,7 @@ try {
       if (typeof window.toggleBuzonVisibility === 'function') window.toggleBuzonVisibility(isBuzonSectionVisible);
       if (typeof window.renderCommentsListFromMemory === 'function') window.renderCommentsListFromMemory();
       if (typeof window.refreshAdminCommentsList === 'function') window.refreshAdminCommentsList();
+      if (typeof checkPendingSharedDeepLink === 'function') checkPendingSharedDeepLink();
     }
     window.applyAllSectionsChangesToDOM = applyAllSectionsChangesToDOM;
 
@@ -10855,16 +10925,34 @@ try {
       closeInsertColorModal();
     }
 
-    // DESTELLO DE MURCIÉLAGOS TRAIL (POOL REUTILIZABLE DE BAJO CONSUMO TÉRMICO EN MÓVILES)
+    // DESTELLO DE MURCIÉLAGOS TRAIL (ACTIVO EN ESCRITORIO Y CELULAR, DESACTIVADO EN LOS JUEGOS)
     (function initBatSparkles() {
       let lastBatTime = 0;
       let lastX = 0;
       let lastY = 0;
       let activeBatsCount = 0;
-      const MAX_ACTIVE_BATS = 4;
+      const MAX_ACTIVE_BATS = 5;
       const batPool = [];
       let pendingCoord = null;
       let rafScheduled = false;
+
+      function isAnyGameRunning() {
+        if (window.__isMiniGameScreenOpen || window.activeMiniGame) return true;
+        if (document.body && document.body.classList.contains('blutu-egg-active')) return true;
+        const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
+        if (modalBox && modalBox.classList.contains('is-minigame-active')) return true;
+        return false;
+      }
+
+      window.clearActiveBatParticles = function clearActiveBatParticles() {
+        pendingCoord = null;
+        document.querySelectorAll('.bat-sparkle-particle').forEach((node) => {
+          node.remove();
+          node.className = '';
+          if (batPool.length < MAX_ACTIVE_BATS) batPool.push(node);
+        });
+        activeBatsCount = 0;
+      };
 
       function acquireBatNode() {
         if (batPool.length > 0) return batPool.pop();
@@ -10873,17 +10961,19 @@ try {
         return bat;
       }
 
-      function spawnBat(x, y, isTouch = false) {
-        if (document.hidden) return;
+      function spawnBat(x, y, isTouch = false, isTapStart = false) {
+        if (document.hidden || isAnyGameRunning()) return;
         const now = performance.now();
         const isMobileScreen = isTouch || (window.innerWidth <= 768);
-        const minInterval = isTouch ? 180 : 140;
+        const minInterval = isTouch ? 165 : 140;
         if (now - lastBatTime < minInterval) return;
         if (activeBatsCount >= MAX_ACTIVE_BATS) return;
 
         const dist = Math.hypot(x - lastX, y - lastY);
-        if (!isTouch && dist < 35) return;
-        if (isTouch && dist < 28) return;
+        if (!isTapStart) {
+          if (!isTouch && dist < 35) return;
+          if (isTouch && dist < 26) return;
+        }
 
         lastBatTime = now;
         lastX = x;
@@ -10924,48 +11014,47 @@ try {
       function processPointer() {
         rafScheduled = false;
         if (pendingCoord) {
-          spawnBat(pendingCoord.x, pendingCoord.y, pendingCoord.isTouch);
+          const next = pendingCoord;
           pendingCoord = null;
+          spawnBat(next.x, next.y, next.isTouch, next.isTapStart);
         }
       }
 
-      function queuePointer(x, y, isTouch = false) {
-        if (document.hidden) return;
+      function queuePointer(x, y, isTouch = false, isTapStart = false) {
+        if (document.hidden || isAnyGameRunning()) return;
         if (activeBatsCount >= MAX_ACTIVE_BATS) return;
         const now = performance.now();
-        const minInterval = isTouch ? 180 : 140;
+        const minInterval = isTouch ? 165 : 140;
         if (now - lastBatTime < minInterval) return;
         const pixelModal = document.getElementById('pixelCanvasModal');
         if (pixelModal && pixelModal.style.display === 'flex') return;
-        pendingCoord = { x, y, isTouch };
+        pendingCoord = { x, y, isTouch, isTapStart: Boolean(isTapStart || (pendingCoord && pendingCoord.isTapStart)) };
         if (!rafScheduled) {
           rafScheduled = true;
           requestAnimationFrame(processPointer);
         }
       }
 
-      // Mouse en Escritorio
-      window.addEventListener('mousemove', function(e) {
-        queuePointer(e.clientX, e.clientY, false);
-      }, { passive: true });
+      // Mouse en Escritorio (solo dispositivos con puntero real)
+      if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
+        window.addEventListener('mousemove', function(e) {
+          queuePointer(e.clientX, e.clientY, false, false);
+        }, { passive: true });
+      }
 
-      // Toques en Celular / Dispositivos Táctiles (tap inicial)
+      // Generación de partículas en Celular (toque y deslizamiento, desactivada en los juegos)
       window.addEventListener('touchstart', function(e) {
-        if (e.touches && e.touches.length > 0) {
+        if (e.touches && e.touches.length === 1) {
           const touch = e.touches[0];
-          queuePointer(touch.clientX, touch.clientY, true);
+          queuePointer(touch.clientX, touch.clientY, true, true);
         }
       }, { passive: true });
 
-      // Desplazamiento táctil en celular (optimizado para no saturar CPU durante scroll)
-      let lastTouchMoveTime = 0;
       window.addEventListener('touchmove', function(e) {
-        if (!e.touches || e.touches.length === 0) return;
-        const now = performance.now();
-        if (now - lastTouchMoveTime < 175) return;
-        lastTouchMoveTime = now;
-        const touch = e.touches[0];
-        queuePointer(touch.clientX, touch.clientY, true);
+        if (e.touches && e.touches.length === 1) {
+          const touch = e.touches[0];
+          queuePointer(touch.clientX, touch.clientY, true, false);
+        }
       }, { passive: true });
     })();
 
