@@ -154,6 +154,10 @@ export function destroyActiveMiniGame(keepAudioAlive = false) {
       clearTimeout(activeMiniGame.wrongTapTimeout);
       activeMiniGame.wrongTapTimeout = null;
     }
+    if (activeMiniGame.wrongCellTimers && typeof activeMiniGame.wrongCellTimers.forEach === "function") {
+      activeMiniGame.wrongCellTimers.forEach((tid) => clearTimeout(tid));
+      activeMiniGame.wrongCellTimers.clear();
+    }
     if (activeMiniGame.finishTimer) {
       clearTimeout(activeMiniGame.finishTimer);
       activeMiniGame.finishTimer = null;
@@ -169,6 +173,11 @@ export function destroyActiveMiniGame(keepAudioAlive = false) {
 export function launchMiniGameFromBlog(gameType, mode) {
   if (window.isAdminMode && document.getElementById("blogEditableBody") && typeof window.syncLiveBlogModalToMemory === "function") {
     window.syncLiveBlogModalToMemory(true);
+  }
+
+  // Si el juego Dino del encabezado estaba abierto, cerrarlo primero para no mantener dos juegos activos
+  if (document.getElementById("blutuDinoStage") && typeof window.destroyBlutuDinoEasterEgg === "function") {
+    window.destroyBlutuDinoEasterEgg();
   }
 
   const alreadyPlayingMusic = isSharedGameMusicActive();
@@ -662,31 +671,65 @@ function schedulePcMemoramaTurn(game, delayMs) {
 }
 
 function buildGothicBatSvgHTML() {
-  return `<svg class="minigame-win-bat-svg" viewBox="0 0 64 36" aria-hidden="true" focusable="false">
-    <g class="minigame-bat-wing-l"><path d="M30 19 C23 9, 11 4, 1 11 C7 13, 10 17, 9 22 C15 19, 19 21, 21 25 C25 22, 28 22, 30 23 Z"/></g>
-    <g class="minigame-bat-wing-r"><path d="M34 19 C41 9, 53 4, 63 11 C57 13, 54 17, 55 22 C49 19, 45 21, 43 25 C39 22, 36 22, 34 23 Z"/></g>
-    <path class="minigame-bat-body" d="M29.5 14 L28 9 L31 12.5 L33 12.5 L36 9 L34.5 14 C35.5 18, 35 23, 32 27 C29 23, 28.5 18, 29.5 14 Z"/>
+  const wingL = "M32 21 C24 10, 12 5, 2 12 C8 14, 11 18, 10 24 C16 20, 20 22, 22 26 C26 23, 29 23, 32 24 Z";
+  const wingR = "M36 21 C44 10, 56 5, 66 12 C60 14, 57 18, 58 24 C52 20, 48 22, 46 26 C42 23, 39 23, 36 24 Z";
+  const body = "M31.4 15.5 L29.6 9.6 L33 13.8 L35 13.8 L38.4 9.6 L36.6 15.5 C37.8 20, 37.2 25.5, 34 30 C30.8 25.5, 30.2 20, 31.4 15.5 Z";
+  return `<svg class="minigame-win-bat-svg" viewBox="-6 -6 80 52" aria-hidden="true" focusable="false">
+    <ellipse cx="34" cy="20" rx="29" ry="13" fill="currentColor" fill-opacity="0.075"/>
+    <ellipse cx="34" cy="20" rx="18" ry="8.5" fill="currentColor" fill-opacity="0.095"/>
+    <g class="minigame-bat-wing-l">
+      <path d="${wingL}" fill="none" stroke="currentColor" stroke-width="9.5" stroke-opacity="0.065" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingL}" fill="none" stroke="currentColor" stroke-width="5.8" stroke-opacity="0.115" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingL}" fill="none" stroke="currentColor" stroke-width="3.0" stroke-opacity="0.185" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingL}" fill="currentColor" fill-opacity="0.34" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.22" stroke-linejoin="round"/>
+    </g>
+    <g class="minigame-bat-wing-r">
+      <path d="${wingR}" fill="none" stroke="currentColor" stroke-width="9.5" stroke-opacity="0.065" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingR}" fill="none" stroke="currentColor" stroke-width="5.8" stroke-opacity="0.115" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingR}" fill="none" stroke="currentColor" stroke-width="3.0" stroke-opacity="0.185" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${wingR}" fill="currentColor" fill-opacity="0.34" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.22" stroke-linejoin="round"/>
+    </g>
+    <path d="${body}" fill="none" stroke="currentColor" stroke-width="6.4" stroke-opacity="0.11" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${body}" fill="none" stroke="currentColor" stroke-width="2.8" stroke-opacity="0.19" stroke-linejoin="round" stroke-linecap="round"/>
+    <path class="minigame-bat-body" d="${body}" fill="currentColor" fill-opacity="0.44"/>
+    <circle cx="32.6" cy="15.8" r="1.45" fill="#ffffff" fill-opacity="0.20"/>
+    <circle cx="32.6" cy="15.8" r="0.82" fill="#ffffff" fill-opacity="0.56"/>
+    <circle cx="35.4" cy="15.8" r="1.45" fill="#ffffff" fill-opacity="0.20"/>
+    <circle cx="35.4" cy="15.8" r="0.82" fill="#ffffff" fill-opacity="0.56"/>
   </svg>`;
 }
 
-function buildVictoryBatsBackdropHTML() {
-  const specs = [
-    { dir: "ltr", top: "14%", size: "38px", dur: "4.4s", delay: "0s", drift: "-26px", flap: "0.26s" },
-    { dir: "rtl", top: "24%", size: "30px", dur: "3.9s", delay: "0.35s", drift: "-18px", flap: "0.22s" },
-    { dir: "ltr", top: "38%", size: "44px", dur: "4.9s", delay: "0.75s", drift: "-34px", flap: "0.28s" },
-    { dir: "rtl", top: "52%", size: "34px", dur: "4.2s", delay: "0.18s", drift: "-22px", flap: "0.24s" },
-    { dir: "ltr", top: "66%", size: "28px", dur: "3.7s", delay: "1.1s", drift: "-30px", flap: "0.21s" },
-    { dir: "rtl", top: "76%", size: "42px", dur: "4.7s", delay: "0.6s", drift: "-28px", flap: "0.27s" },
-    { dir: "ltr", top: "28%", size: "26px", dur: "3.6s", delay: "1.55s", drift: "-20px", flap: "0.2s" },
-    { dir: "rtl", top: "44%", size: "40px", dur: "4.6s", delay: "1.35s", drift: "-32px", flap: "0.25s" },
-    { dir: "ltr", top: "82%", size: "32px", dur: "4.1s", delay: "1.85s", drift: "-24px", flap: "0.23s" },
-    { dir: "rtl", top: "18%", size: "35px", dur: "4.5s", delay: "2.15s", drift: "-26px", flap: "0.25s" }
-  ];
+function buildVictoryBatsCorridorHTML(zone, innerDecorHTML = "") {
+  const specsByZone = {
+    top: [
+      { dir: "ltr", top: "0%", size: "54px", dur: "4.1s", delay: "-0.4s", drift: "-5px", flap: "0.22s", op: "0.78" },
+      { dir: "rtl", top: "16%", size: "58px", dur: "4.6s", delay: "-2.1s", drift: "-4px", flap: "0.25s", op: "0.82" },
+      { dir: "ltr", top: "28%", size: "46px", dur: "3.7s", delay: "-1.5s", drift: "3px", flap: "0.20s", op: "0.68" },
+      { dir: "rtl", top: "6%", size: "50px", dur: "4.3s", delay: "-3.1s", drift: "-5px", flap: "0.23s", op: "0.74" },
+      { dir: "ltr", top: "20%", size: "44px", dur: "3.9s", delay: "-2.7s", drift: "2px", flap: "0.21s", op: "0.64" }
+    ],
+    mid: [
+      { dir: "rtl", top: "10%", size: "50px", dur: "4.0s", delay: "-0.8s", drift: "-3px", flap: "0.22s", op: "0.78" },
+      { dir: "ltr", top: "20%", size: "46px", dur: "4.4s", delay: "-2.4s", drift: "3px", flap: "0.24s", op: "0.72" },
+      { dir: "rtl", top: "14%", size: "42px", dur: "3.6s", delay: "-1.9s", drift: "2px", flap: "0.20s", op: "0.66" }
+    ],
+    bottom: [
+      { dir: "ltr", top: "6%", size: "52px", dur: "4.2s", delay: "-0.6s", drift: "3px", flap: "0.23s", op: "0.78" },
+      { dir: "rtl", top: "18%", size: "48px", dur: "3.9s", delay: "-2.0s", drift: "-3px", flap: "0.21s", op: "0.72" },
+      { dir: "ltr", top: "12%", size: "44px", dur: "4.5s", delay: "-3.0s", drift: "4px", flap: "0.24s", op: "0.66" }
+    ]
+  };
+  const specs = specsByZone[zone] || specsByZone.top;
   const svg = buildGothicBatSvgHTML();
   const batsHTML = specs.map((s) => (
-    `<span class="minigame-win-bat is-${s.dir}" style="--bat-top:${s.top};--bat-size:${s.size};--bat-dur:${s.dur};--bat-delay:${s.delay};--bat-drift:${s.drift};--bat-flap:${s.flap};">${svg}</span>`
+    `<span class="minigame-win-bat is-${s.dir}" style="--bat-top:${s.top};--bat-size:${s.size};--bat-dur:${s.dur};--bat-delay:${s.delay};--bat-drift:${s.drift};--bat-flap:${s.flap};--bat-op:${s.op};">${svg}</span>`
   )).join("");
-  return `<div class="minigame-win-bats-layer" aria-hidden="true">${batsHTML}</div>`;
+  return `
+    <div class="minigame-card-bat-corridor is-${zone}-corridor" aria-hidden="true">
+      ${innerDecorHTML}
+      <div class="minigame-corridor-bats">${batsHTML}</div>
+    </div>
+  `;
 }
 
 function buildResultCardCrestHTML() {
@@ -721,19 +764,18 @@ function finishMemoramaMatch(game, elapsedMs) {
 
   const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
   const crestHTML = buildResultCardCrestHTML();
+  const dividerHTML = `<div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>`;
 
   if (mode === "solo") {
     const timeStr = formatMemoramaTime(elapsedMs);
-    const batsHTML = buildVictoryBatsBackdropHTML();
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage is-win-stage">
-        ${batsHTML}
         <div class="minigame-result-card is-victory">
-          ${crestHTML}
+          ${buildVictoryBatsCorridorHTML("top", crestHTML)}
           <span class="minigame-result-kicker">Memorama · Solo</span>
           <h2 class="minigame-result-title is-time-score">${escapeTxt(timeStr)}</h2>
-          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          ${buildVictoryBatsCorridorHTML("mid", dividerHTML)}
           <div class="minigame-result-buttons">
             <div class="minigame-result-primary-row">
               <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Reintentar</button>
@@ -743,8 +785,9 @@ function finishMemoramaMatch(game, elapsedMs) {
               <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcEasyStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-easy')">Fácil</button>
               <button type="button" class="game-custom-btn is-submode-btn" style="${vsPcHardStyle}" onclick="launchMiniGameFromBlog('memorama', 'vspc-hard')">Difícil</button>
             </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+            <button type="button" class="game-custom-btn is-volver-btn is-full-row-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
+          ${buildVictoryBatsCorridorHTML("bottom")}
         </div>
       </div>
     `;
@@ -764,14 +807,15 @@ function finishMemoramaMatch(game, elapsedMs) {
     const otherVsMode = mode === "vspc-easy" ? "vspc-hard" : "vspc-easy";
     const otherVsLabel = mode === "vspc-easy" ? "Difícil" : "Fácil";
     const otherVsStyle = mode === "vspc-easy" ? vsPcHardStyle : vsPcEasyStyle;
-    const batsHTML = didUserWin ? buildVictoryBatsBackdropHTML() : "";
+    const topSlotHTML = didUserWin ? buildVictoryBatsCorridorHTML("top", crestHTML) : crestHTML;
+    const midSlotHTML = didUserWin ? buildVictoryBatsCorridorHTML("mid", dividerHTML) : dividerHTML;
+    const bottomSlotHTML = didUserWin ? buildVictoryBatsCorridorHTML("bottom") : "";
 
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage${didUserWin ? " is-win-stage" : ""}">
-        ${batsHTML}
         <div class="minigame-result-card ${cardTone}">
-          ${crestHTML}
+          ${topSlotHTML}
           <span class="minigame-result-kicker">Memorama · Vs PC ${currentDiffLabel}</span>
           <h2 class="minigame-result-title">${outcomeTitle}</h2>
           <div class="minigame-duel-scoreboard">
@@ -785,15 +829,18 @@ function finishMemoramaMatch(game, elapsedMs) {
               <span class="minigame-duel-score">${pcPairs}</span>
             </div>
           </div>
-          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          ${midSlotHTML}
           <div class="minigame-result-buttons">
             <div class="minigame-result-primary-row">
               <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('memorama', '${mode}')">Reintentar</button>
               <button type="button" class="game-custom-btn" style="${otherVsStyle}" onclick="launchMiniGameFromBlog('memorama', '${otherVsMode}')">Vs PC ${otherVsLabel}</button>
-              <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
             </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+            <div class="minigame-result-primary-row">
+              <button type="button" class="game-custom-btn" style="${soloStyle}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
+              <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+            </div>
           </div>
+          ${bottomSlotHTML}
         </div>
       </div>
     `;
@@ -827,7 +874,8 @@ function startSixBySixRuntime(mode) {
     startTime: performance.now(),
     durationMs,
     rafId: null,
-    wrongTapTimeout: null
+    wrongTapTimeout: null,
+    wrongCellTimers: new Map()
   };
   setActiveMiniGame(game);
 
@@ -945,6 +993,11 @@ export function handleSixBySixCellTap(cellIdx, num) {
   if (!cellEl || cellEl.classList.contains("is-disappeared")) return;
 
   if (num === game.nextExpected) {
+    if (game.wrongCellTimers && game.wrongCellTimers.has(cellIdx)) {
+      clearTimeout(game.wrongCellTimers.get(cellIdx));
+      game.wrongCellTimers.delete(cellIdx);
+    }
+    cellEl.classList.remove("is-wrong-tap");
     game.highestReached = num;
     game.nextExpected = num + 1;
     cellEl.classList.add("is-disappeared");
@@ -953,6 +1006,7 @@ export function handleSixBySixCellTap(cellIdx, num) {
     cellEl.innerHTML = `<img src="blutu_logo.png" alt="" class="sixbysix-cleared-logo" decoding="async">`;
 
     if (game.highestReached >= 36) {
+      const finalElapsedMs = Math.max(0, Math.min(game.durationMs, performance.now() - game.startTime));
       game.finishing = true;
       if (game.rafId) {
         cancelAnimationFrame(game.rafId);
@@ -965,7 +1019,7 @@ export function handleSixBySixCellTap(cellIdx, num) {
 
       game.finishTimer = setTimeout(() => {
         if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
-        finishSixBySixMatch(game, true);
+        finishSixBySixMatch(game, true, finalElapsedMs);
       }, 1100);
       return;
     }
@@ -973,13 +1027,24 @@ export function handleSixBySixCellTap(cellIdx, num) {
     const nextEl = document.getElementById("sixHudNextNum");
     if (nextEl) nextEl.textContent = String(game.nextExpected);
   } else {
+    if (!game.wrongCellTimers) {
+      game.wrongCellTimers = new Map();
+    }
+    if (game.wrongCellTimers.has(cellIdx)) {
+      clearTimeout(game.wrongCellTimers.get(cellIdx));
+      game.wrongCellTimers.delete(cellIdx);
+    }
     cellEl.classList.remove("is-wrong-tap");
     void cellEl.offsetWidth;
     cellEl.classList.add("is-wrong-tap");
-    if (game.wrongTapTimeout) clearTimeout(game.wrongTapTimeout);
-    game.wrongTapTimeout = setTimeout(() => {
-      if (cellEl) cellEl.classList.remove("is-wrong-tap");
-    }, 220);
+    const timerId = setTimeout(() => {
+      if (game.wrongCellTimers) {
+        game.wrongCellTimers.delete(cellIdx);
+      }
+      const targetEl = document.getElementById(`sixCell_${cellIdx}`) || cellEl;
+      if (targetEl) targetEl.classList.remove("is-wrong-tap");
+    }, 240);
+    game.wrongCellTimers.set(cellIdx, timerId);
   }
 }
 
@@ -998,7 +1063,7 @@ export function finishSixBySixHardManual() {
   }, 420);
 }
 
-function finishSixBySixMatch(game, completedAll) {
+function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
   const mode = game.mode;
   const reachedNum = game.highestReached;
 
@@ -1016,33 +1081,41 @@ function finishSixBySixMatch(game, completedAll) {
 
   const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
   const crestHTML = buildResultCardCrestHTML();
+  const dividerHTML = `<div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>`;
 
   if (mode === "easy") {
     const isWin = Boolean(completedAll);
-    const batsHTML = isWin ? buildVictoryBatsBackdropHTML() : "";
     const cardTone = isWin ? "is-victory" : "is-neutral";
+    const timeStr = formatMemoramaTime(elapsedMs);
+    const topSlotHTML = isWin ? buildVictoryBatsCorridorHTML("top", crestHTML) : crestHTML;
+    const midSlotHTML = isWin ? buildVictoryBatsCorridorHTML("mid", dividerHTML) : dividerHTML;
+    const bottomSlotHTML = isWin ? buildVictoryBatsCorridorHTML("bottom") : "";
     const titleHTML = isWin
       ? `
         <h2 class="minigame-result-title">Lo lograste</h2>
         <div class="minigame-six-complete-badge">36</div>
+        <div class="minigame-victory-time-readout">
+          <span class="minigame-victory-time-label">Tiempo</span>
+          <span class="minigame-victory-time-value">${escapeTxt(timeStr)}</span>
+        </div>
       `
       : `<h2 class="minigame-result-title is-big-score-num">${reachedNum}</h2>`;
 
     modalBody.innerHTML = `
       <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage${isWin ? " is-win-stage" : ""}">
-        ${batsHTML}
         <div class="minigame-result-card ${cardTone}">
-          ${crestHTML}
+          ${topSlotHTML}
           ${titleHTML}
-          <div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>
+          ${midSlotHTML}
           <div class="minigame-result-buttons">
             <div class="minigame-result-primary-row">
               <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Reintentar</button>
               <button type="button" class="game-custom-btn" style="${hardStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
             </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+            <button type="button" class="game-custom-btn is-volver-btn is-full-row-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
+          ${bottomSlotHTML}
         </div>
       </div>
     `;
@@ -1059,7 +1132,7 @@ function finishSixBySixMatch(game, completedAll) {
               <button type="button" class="game-custom-btn" style="${retryStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Reintentar</button>
               <button type="button" class="game-custom-btn" style="${easyStyle}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
             </div>
-            <button type="button" class="game-custom-btn is-volver-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
+            <button type="button" class="game-custom-btn is-volver-btn is-full-row-btn" style="${backStyle}" onclick="exitMiniGameVolver()">Volver</button>
           </div>
         </div>
       </div>

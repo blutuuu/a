@@ -1,15 +1,38 @@
 /* Blutu — Motor Compartido de Música de Partida ("Escaleras" Completa - Blutu)
-   100% Bajo Demanda: Cero carga al abrir la página, canción completa en Instagram/móvil/escritorio y destrucción total al salir */
+   100% Bajo Demanda y Exclusividad Estricta de Fuente Única (Mutex):
+   Cero carga al abrir la página, jamás reproduce dos motores simultáneamente y se destruye por completo al salir */
 
 const GAME_SONG_VIDEO_ID = '3Ea5h9Xqe3E';
 const GAME_SC_TRACK_ID = '2328169097'; // "Escaleras" completa (1:44) en el perfil oficial de SoundCloud de Blutu
 const GAME_ITUNES_TRACK_ID = '6773560493';
 const GAME_ITUNES_ARTIST_ID = '1223269133';
 const GAME_AUDIO_SESSION_CACHE_KEY = 'blutu_escaleras_audio_url';
+const GAME_MUTE_SESSION_KEY = 'blutu_shared_music_muted';
 export const GAME_DIRECT_PREVIEW_URL = 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/ec/fb/45/ecfb4526-93d2-03e7-c901-a297111f1458/mzaf_14659704648749163645.plus.aac.p.m4a';
 
 let sharedAudioCtx = null;
-let sharedMusicMuted = false;
+
+try {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(GAME_MUTE_SESSION_KEY);
+  }
+} catch (e) {}
+
+function readInitialMutedState() {
+  if (typeof window !== 'undefined' && typeof window.__blutuSharedMusicMuted === 'boolean') {
+    return window.__blutuSharedMusicMuted;
+  }
+  return false;
+}
+
+function persistMutedState(muted) {
+  const val = Boolean(muted);
+  if (typeof window !== 'undefined') {
+    window.__blutuSharedMusicMuted = val;
+  }
+}
+
+let sharedMusicMuted = readInitialMutedState();
 
 function readCachedPreviewUrl() {
   try {
@@ -34,6 +57,8 @@ export function isRestrictedInAppWebView() {
 
 const audioState = {
   isActive: false,
+  runToken: 0,
+  activeEngine: 'none', // 'none' | 'sc' | 'yt' | 'bridge' — a lo sumo UN motor montado/activo a la vez
   hostEl: null,
   muteBtnIds: new Set(),
   // Motor primario de canción completa (SoundCloud HTML5 Audio Widget — sin decodificación de video ni sobrecalentamiento)
@@ -44,14 +69,14 @@ const audioState = {
   isScPlayingFull: false,
   isScScriptLoading: false,
   scFallbackTimer: null,
-  // Motor secundario de canción completa (YouTube IFrame API)
+  // Motor secundario de canción completa (YouTube IFrame API, montado SOLO tras destruir SoundCloud si SC falla)
   ytContainerEl: null,
   ytPlayer: null,
   isYtReady: false,
   isYtPlayingUnmuted: false,
   isYtScriptLoaded: false,
   ytVerifyTimer: null,
-  // Respaldo de emergencia HTML5 <audio> si ambos motores completos son bloqueados temporalmente
+  // Respaldo de emergencia HTML5 <audio> (activado SOLO tras destruir SC y YT si ambos fallan)
   bridgeAudio: null,
   bridgeBlobUrl: null,
   usingBridgeAudio: false,
@@ -65,7 +90,10 @@ const ytReadyWaiters = [];
 const scScriptWaiters = [];
 
 function isFullSongPlayingNow() {
-  return Boolean(audioState.isScPlayingFull || audioState.isYtPlayingUnmuted);
+  return Boolean(
+    (audioState.activeEngine === 'sc' && audioState.isScPlayingFull) ||
+    (audioState.activeEngine === 'yt' && audioState.isYtPlayingUnmuted)
+  );
 }
 
 function notifyYtApiReady() {
@@ -189,7 +217,6 @@ export function preloadSharedGameMusicApi() {
     resolveFreshItunesPreviewUrl().catch(() => {});
   }
 
-  // Pre-cargar ligero (5.5 KB) el controlador oficial del widget de audio completo sin crear iframes ni descargar audio aún
   ensureScWidgetApiLoaded();
 }
 
@@ -221,6 +248,9 @@ export function isSharedGameMusicActive() {
 }
 
 export function isSharedGameMusicMuted() {
+  if (typeof window !== 'undefined' && typeof window.__blutuSharedMusicMuted === 'boolean') {
+    sharedMusicMuted = window.__blutuSharedMusicMuted;
+  }
   return sharedMusicMuted;
 }
 
@@ -231,13 +261,15 @@ export function registerSharedMuteButton(btnId) {
 }
 
 export function syncAllMuteButtonsUI() {
-  const iconHtml = sharedMusicMuted
-    ? '<i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>'
-    : '<i class="fa-solid fa-volume-high" aria-hidden="true"></i>';
+  if (typeof window !== 'undefined' && typeof window.__blutuSharedMusicMuted === 'boolean') {
+    sharedMusicMuted = window.__blutuSharedMusicMuted;
+  }
+  const iconClass = sharedMusicMuted ? 'fa-volume-xmark' : 'fa-volume-high';
+  const iconHtml = `<i class="fa-solid ${iconClass}" aria-hidden="true"></i>`;
   const label = sharedMusicMuted ? 'Activar música' : 'Silenciar música';
 
   audioState.muteBtnIds.forEach((id) => {
-    const btn = document.getElementById(id);
+    const btn = typeof document !== 'undefined' ? document.getElementById(id) : null;
     if (!btn) return;
     btn.classList.toggle('is-muted', sharedMusicMuted);
     btn.setAttribute('aria-label', label);
@@ -248,7 +280,7 @@ export function syncAllMuteButtonsUI() {
 }
 
 function sendScPostMessage(method, value) {
-  const iframe = audioState.scIframeEl || document.getElementById('blutu-shared-sc-iframe');
+  const iframe = audioState.scIframeEl || (typeof document !== 'undefined' ? document.getElementById('blutu-shared-sc-iframe') : null);
   if (!iframe || !iframe.contentWindow) return;
   try {
     const payload = value === undefined ? { method } : { method, value };
@@ -257,7 +289,7 @@ function sendScPostMessage(method, value) {
 }
 
 function sendYtPostMessage(funcName, args) {
-  const iframe = document.getElementById('blutu-shared-yt-iframe');
+  const iframe = typeof document !== 'undefined' ? document.getElementById('blutu-shared-yt-iframe') : null;
   if (!iframe || !iframe.contentWindow) return;
   try {
     iframe.contentWindow.postMessage(
@@ -267,10 +299,24 @@ function sendYtPostMessage(funcName, args) {
   } catch (e) {}
 }
 
-function stopAndCleanBridgeAudio() {
+function pauseBridgeAudioSilently() {
   audioState.usingBridgeAudio = false;
   if (audioState.bridgeAudio) {
     try {
+      audioState.bridgeAudio.muted = true;
+      audioState.bridgeAudio.pause();
+    } catch (e) {}
+  }
+}
+
+function stopAndCleanBridgeAudio() {
+  audioState.usingBridgeAudio = false;
+  if (audioState.activeEngine === 'bridge') {
+    audioState.activeEngine = 'none';
+  }
+  if (audioState.bridgeAudio) {
+    try {
+      audioState.bridgeAudio.muted = true;
       audioState.bridgeAudio.pause();
       audioState.bridgeAudio.removeAttribute('src');
       audioState.bridgeAudio.load();
@@ -280,17 +326,20 @@ function stopAndCleanBridgeAudio() {
     } catch (e) {}
     audioState.bridgeAudio = null;
   }
-  const strayEl = typeof document !== 'undefined' ? document.getElementById('blutu-shared-direct-audio') : null;
-  if (strayEl) {
-    try {
-      strayEl.pause();
-      strayEl.removeAttribute('src');
-      strayEl.load();
-      strayEl.remove();
-    } catch (e) {}
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('#blutu-shared-direct-audio').forEach((strayEl) => {
+      try {
+        strayEl.muted = true;
+        strayEl.pause();
+        strayEl.removeAttribute('src');
+        strayEl.load();
+        strayEl.remove();
+      } catch (e) {}
+    });
   }
   if (typeof window !== 'undefined' && window.__blutuPrimedGestureAudio) {
     try {
+      window.__blutuPrimedGestureAudio.muted = true;
       window.__blutuPrimedGestureAudio.pause();
       if (window.__blutuPrimedGestureAudio.parentNode) {
         window.__blutuPrimedGestureAudio.parentNode.removeChild(window.__blutuPrimedGestureAudio);
@@ -307,6 +356,9 @@ function stopAndCleanBridgeAudio() {
 function stopAndDestroyYouTubeEngine() {
   audioState.isYtReady = false;
   audioState.isYtPlayingUnmuted = false;
+  if (audioState.activeEngine === 'yt') {
+    audioState.activeEngine = 'none';
+  }
   if (audioState.ytVerifyTimer) {
     clearTimeout(audioState.ytVerifyTimer);
     audioState.ytVerifyTimer = null;
@@ -320,13 +372,14 @@ function stopAndDestroyYouTubeEngine() {
   } else {
     sendYtPostMessage('stopVideo');
   }
-  const ytCont = audioState.ytContainerEl || (typeof document !== 'undefined' ? document.getElementById('blutu-shared-yt-container') : null);
-  if (ytCont) {
-    try {
-      const ifr = ytCont.querySelector('iframe');
-      if (ifr) ifr.src = 'about:blank';
-      ytCont.remove();
-    } catch (e) {}
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('#blutu-shared-yt-container').forEach((ytCont) => {
+      try {
+        const ifr = ytCont.querySelector('iframe');
+        if (ifr) ifr.src = 'about:blank';
+        ytCont.remove();
+      } catch (e) {}
+    });
   }
   audioState.ytContainerEl = null;
 }
@@ -334,37 +387,56 @@ function stopAndDestroyYouTubeEngine() {
 function stopAndDestroySoundCloudEngine() {
   audioState.isScReady = false;
   audioState.isScPlayingFull = false;
+  if (audioState.activeEngine === 'sc') {
+    audioState.activeEngine = 'none';
+  }
   if (audioState.scFallbackTimer) {
     clearTimeout(audioState.scFallbackTimer);
     audioState.scFallbackTimer = null;
   }
   if (audioState.scWidget) {
-    try { audioState.scWidget.pause(); } catch (e) {}
+    try {
+      audioState.scWidget.setVolume(0);
+      audioState.scWidget.pause();
+    } catch (e) {}
     audioState.scWidget = null;
   } else {
+    sendScPostMessage('setVolume', 0);
     sendScPostMessage('pause');
   }
-  const scCont = audioState.scContainerEl || (typeof document !== 'undefined' ? document.getElementById('blutu-shared-sc-container') : null);
-  if (scCont) {
-    try {
-      const ifr = scCont.querySelector('iframe');
-      if (ifr) ifr.src = 'about:blank';
-      scCont.remove();
-    } catch (e) {}
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('#blutu-shared-sc-container').forEach((scCont) => {
+      try {
+        const ifr = scCont.querySelector('iframe');
+        if (ifr) ifr.src = 'about:blank';
+        scCont.remove();
+      } catch (e) {}
+    });
   }
   audioState.scContainerEl = null;
   audioState.scIframeEl = null;
 }
 
-function attachBridgeAudioRecovery(audioEl) {
+function attachBridgeAudioGuardsAndRecovery(audioEl) {
   if (!audioEl || audioEl._blutuRecoveryBound) return;
   audioEl._blutuRecoveryBound = true;
 
+  // Guardián estricto: jamás permite que el <audio> de respaldo suene si otro motor está activo o si está silenciado
+  audioEl.addEventListener('playing', () => {
+    if (!audioState.isActive || audioState.activeEngine !== 'bridge' || !audioState.usingBridgeAudio || sharedMusicMuted) {
+      try {
+        audioEl.muted = true;
+        audioEl.pause();
+      } catch (e) {}
+    }
+  });
+
   audioEl.addEventListener('error', () => {
-    if (!audioState.isActive || !audioState.usingBridgeAudio || isFullSongPlayingNow()) return;
+    const token = audioState.runToken;
+    if (!audioState.isActive || audioState.activeEngine !== 'bridge' || !audioState.usingBridgeAudio) return;
 
     if (!audioState.bridgeLookupTried) {
-      triggerItunesBridgeLookup();
+      triggerItunesBridgeLookup(token);
       return;
     }
 
@@ -373,7 +445,15 @@ function attachBridgeAudioRecovery(audioEl) {
       fetch(audioState.resolvedBridgeUrl || GAME_DIRECT_PREVIEW_URL, { mode: 'cors', credentials: 'omit' })
         .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status))))
         .then((buf) => {
-          if (!audioState.isActive || !audioState.usingBridgeAudio || !audioState.bridgeAudio || isFullSongPlayingNow()) return;
+          if (
+            !audioState.isActive ||
+            token !== audioState.runToken ||
+            audioState.activeEngine !== 'bridge' ||
+            !audioState.usingBridgeAudio ||
+            !audioState.bridgeAudio
+          ) {
+            return;
+          }
           if (audioState.bridgeBlobUrl) {
             try { URL.revokeObjectURL(audioState.bridgeBlobUrl); } catch (e) {}
           }
@@ -394,12 +474,21 @@ function attachBridgeAudioRecovery(audioEl) {
   });
 }
 
-function triggerItunesBridgeLookup() {
-  if (audioState.bridgeLookupTried || !audioState.isActive || isFullSongPlayingNow()) return;
+function triggerItunesBridgeLookup(token) {
+  if (audioState.bridgeLookupTried || !audioState.isActive || audioState.activeEngine !== 'bridge') return;
   audioState.bridgeLookupTried = true;
   resolveFreshItunesPreviewUrl()
     .then((freshUrl) => {
-      if (!freshUrl || !audioState.isActive || !audioState.usingBridgeAudio || !audioState.bridgeAudio || isFullSongPlayingNow()) return;
+      if (
+        !freshUrl ||
+        !audioState.isActive ||
+        token !== audioState.runToken ||
+        audioState.activeEngine !== 'bridge' ||
+        !audioState.usingBridgeAudio ||
+        !audioState.bridgeAudio
+      ) {
+        return;
+      }
       audioState.bridgeAudio.src = freshUrl;
       audioState.bridgeAudio.loop = true;
       audioState.bridgeAudio.volume = 0.88;
@@ -431,10 +520,10 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
       pre.src = targetUrl;
     }
     pre.volume = 0.88;
-    attachBridgeAudioRecovery(pre);
+    attachBridgeAudioGuardsAndRecovery(pre);
     audioState.bridgeAudio = pre;
 
-    if (playImmediately && !isFullSongPlayingNow()) {
+    if (playImmediately && audioState.activeEngine === 'bridge') {
       audioState.usingBridgeAudio = true;
       pre.muted = sharedMusicMuted;
       if (!sharedMusicMuted && pre.paused) {
@@ -444,7 +533,6 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
         } catch (e) {}
       }
     } else {
-      // Si se había desbloqueado en clic inicial, pausarlo en silencio mientras arranca la canción completa
       try {
         pre.muted = true;
         pre.pause();
@@ -464,7 +552,8 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
     }
     existing.loop = true;
     existing.volume = 0.88;
-    if (playImmediately && !isFullSongPlayingNow()) {
+    attachBridgeAudioGuardsAndRecovery(existing);
+    if (playImmediately && audioState.activeEngine === 'bridge') {
       audioState.usingBridgeAudio = true;
       existing.muted = sharedMusicMuted;
       if (!sharedMusicMuted && existing.paused) {
@@ -473,6 +562,11 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
           if (p && typeof p.catch === 'function') p.catch(() => {});
         } catch (e) {}
       }
+    } else {
+      try {
+        existing.muted = true;
+        existing.pause();
+      } catch (e) {}
     }
     return existing;
   }
@@ -491,10 +585,10 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
     if (document.body) {
       document.body.appendChild(audioEl);
     }
-    attachBridgeAudioRecovery(audioEl);
+    attachBridgeAudioGuardsAndRecovery(audioEl);
     audioState.bridgeAudio = audioEl;
 
-    if (playImmediately && !isFullSongPlayingNow()) {
+    if (playImmediately && audioState.activeEngine === 'bridge') {
       audioState.usingBridgeAudio = true;
       audioEl.muted = sharedMusicMuted;
       if (!sharedMusicMuted) {
@@ -502,12 +596,13 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
         if (p && typeof p.catch === 'function') p.catch(() => {});
       }
     } else {
-      // Desbloquear la sesión de audio dentro del gesto sincrónico sin reproducir el corte de 30s encima
+      // Desbloquear la sesión de audio dentro del gesto sincrónico en silencio absoluto
       audioEl.muted = true;
       const p = audioEl.play();
       if (p && typeof p.then === 'function') {
         p.then(() => {
-          if (audioState.bridgeAudio === audioEl && !audioState.usingBridgeAudio) {
+          if (audioState.bridgeAudio === audioEl && (audioState.activeEngine !== 'bridge' || !audioState.usingBridgeAudio)) {
+            audioEl.muted = true;
             audioEl.pause();
             audioEl.currentTime = 0;
           }
@@ -520,8 +615,14 @@ function ensureBridgeAudioMountedSynchronously(playImmediately) {
   }
 }
 
-function activateTemporaryBridgeAudio() {
-  if (!audioState.isActive || isFullSongPlayingNow()) return;
+function activateTemporaryBridgeAudio(token) {
+  if (!audioState.isActive || token !== audioState.runToken || sharedMusicMuted) return;
+
+  // EXCLUSIVIDAD ESTRICTA: Destruir por completo SoundCloud y YouTube antes de activar el respaldo <audio>
+  stopAndDestroySoundCloudEngine();
+  stopAndDestroyYouTubeEngine();
+
+  audioState.activeEngine = 'bridge';
   audioState.usingBridgeAudio = true;
 
   const a = ensureBridgeAudioMountedSynchronously(true);
@@ -538,39 +639,40 @@ function activateTemporaryBridgeAudio() {
   }
 }
 
-function onFullSongConfirmedPlaying(source) {
-  if (!audioState.isActive) return;
+function onFullSongConfirmedPlaying(source, token) {
+  if (!audioState.isActive || token !== audioState.runToken) return;
   if (source === 'sc') {
+    if (audioState.activeEngine !== 'sc') return;
     audioState.isScPlayingFull = true;
     if (audioState.scFallbackTimer) {
       clearTimeout(audioState.scFallbackTimer);
       audioState.scFallbackTimer = null;
     }
-    // Si YouTube se había montado como respaldo, liberarlo para ahorrar memoria y batería
-    if (audioState.ytContainerEl || audioState.ytPlayer) {
-      stopAndDestroyYouTubeEngine();
-    }
+    stopAndDestroyYouTubeEngine();
+    stopAndCleanBridgeAudio();
   } else if (source === 'yt') {
+    if (audioState.activeEngine !== 'yt') return;
     audioState.isYtPlayingUnmuted = true;
     if (audioState.ytVerifyTimer) {
       clearTimeout(audioState.ytVerifyTimer);
       audioState.ytVerifyTimer = null;
     }
-    if (audioState.scFallbackTimer) {
-      clearTimeout(audioState.scFallbackTimer);
-      audioState.scFallbackTimer = null;
-    }
-  }
-
-  // Detener de inmediato cualquier respaldo corto de 30s para que suene la canción completa de principio a fin
-  if (audioState.usingBridgeAudio || audioState.bridgeAudio) {
+    stopAndDestroySoundCloudEngine();
     stopAndCleanBridgeAudio();
   }
 }
 
 /* ==================== MOTOR 1: SOUNDCLOUD WIDGET OFICIAL ("ESCALERAS" COMPLETA 1:44, SOLO AUDIO) ==================== */
-function mountSoundCloudFullSongEngine() {
-  if (!audioState.isActive || audioState.scContainerEl) return;
+function mountSoundCloudFullSongEngine(token) {
+  if (!audioState.isActive || token !== audioState.runToken || sharedMusicMuted) return;
+  if (audioState.activeEngine === 'sc' && audioState.scContainerEl) return;
+
+  // EXCLUSIVIDAD ESTRICTA: Asegurar que ningún otro reproductor exista antes de montar SoundCloud
+  stopAndDestroyYouTubeEngine();
+  stopAndDestroySoundCloudEngine();
+  pauseBridgeAudioSilently();
+
+  audioState.activeEngine = 'sc';
 
   // Contenedor 4x4 no recortado y con opacidad > 1/255 para que WKWebView (Instagram iOS) y Android WebView no bloqueen el audio
   const scContainer = document.createElement('div');
@@ -578,7 +680,6 @@ function mountSoundCloudFullSongEngine() {
   scContainer.setAttribute('aria-hidden', 'true');
   scContainer.style.cssText = 'position:fixed;bottom:2px;left:2px;width:4px;height:4px;opacity:0.02;pointer-events:none;z-index:2;overflow:hidden;';
 
-  const autoPlayFlag = sharedMusicMuted ? 'false' : 'true';
   const iframe = document.createElement('iframe');
   iframe.id = 'blutu-shared-sc-iframe';
   iframe.width = '180';
@@ -587,7 +688,7 @@ function mountSoundCloudFullSongEngine() {
   iframe.setAttribute('tabindex', '-1');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.cssText = 'border:0;width:180px;height:120px;pointer-events:none;';
-  iframe.src = `https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/${GAME_SC_TRACK_ID}&auto_play=${autoPlayFlag}&buying=false&liking=false&download=false&sharing=false&show_artwork=false&show_comments=false&show_playcount=false&show_user=false&hide_related=true&visual=false`;
+  iframe.src = `https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/${GAME_SC_TRACK_ID}&auto_play=true&buying=false&liking=false&download=false&sharing=false&show_artwork=false&show_comments=false&show_playcount=false&show_user=false&hide_related=true&visual=false`;
 
   scContainer.appendChild(iframe);
   (audioState.hostEl || document.body).appendChild(scContainer);
@@ -595,7 +696,15 @@ function mountSoundCloudFullSongEngine() {
   audioState.scIframeEl = iframe;
 
   ensureScWidgetApiLoaded(() => {
-    if (!audioState.isActive || !audioState.scIframeEl || !(window.SC && typeof window.SC.Widget === 'function')) return;
+    if (
+      !audioState.isActive ||
+      token !== audioState.runToken ||
+      audioState.activeEngine !== 'sc' ||
+      !audioState.scIframeEl ||
+      !(window.SC && typeof window.SC.Widget === 'function')
+    ) {
+      return;
+    }
     try {
       const widget = window.SC.Widget(audioState.scIframeEl);
       audioState.scWidget = widget;
@@ -608,30 +717,53 @@ function mountSoundCloudFullSongEngine() {
       };
 
       widget.bind(Events.READY, () => {
-        if (!audioState.isActive) return;
+        if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'sc') return;
         audioState.isScReady = true;
         try {
-          widget.setVolume(sharedMusicMuted ? 0 : 88);
-          if (!sharedMusicMuted) {
-            widget.play();
-          } else {
+          if (sharedMusicMuted) {
+            widget.setVolume(0);
             widget.pause();
+            return;
           }
+          widget.setVolume(88);
+          widget.isPaused((paused) => {
+            if (paused && audioState.isActive && token === audioState.runToken && audioState.activeEngine === 'sc' && !sharedMusicMuted) {
+              try { widget.play(); } catch (e) {}
+            }
+          });
         } catch (e) {}
       });
 
+      widget.bind(Events.PLAY, () => {
+        if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'sc') return;
+        if (sharedMusicMuted) {
+          try {
+            widget.setVolume(0);
+            widget.pause();
+          } catch (e) {}
+          return;
+        }
+        try { widget.setVolume(88); } catch (e) {}
+        onFullSongConfirmedPlaying('sc', token);
+      });
+
       widget.bind(Events.PLAY_PROGRESS, (ev) => {
-        if (!audioState.isActive || sharedMusicMuted) return;
-        if (ev && typeof ev.currentPosition === 'number' && ev.currentPosition > 80) {
-          if (!audioState.isScPlayingFull) {
-            try { widget.setVolume(88); } catch (e) {}
-            onFullSongConfirmedPlaying('sc');
-          }
+        if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'sc') return;
+        if (sharedMusicMuted) {
+          try {
+            widget.setVolume(0);
+            widget.pause();
+          } catch (e) {}
+          return;
+        }
+        if (ev && typeof ev.currentPosition === 'number' && ev.currentPosition >= 0 && !audioState.isScPlayingFull) {
+          try { widget.setVolume(88); } catch (e) {}
+          onFullSongConfirmedPlaying('sc', token);
         }
       });
 
       widget.bind(Events.FINISH, () => {
-        if (!audioState.isActive) return;
+        if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'sc') return;
         try {
           widget.seekTo(0);
           if (!sharedMusicMuted) widget.play();
@@ -639,39 +771,49 @@ function mountSoundCloudFullSongEngine() {
       });
 
       widget.bind(Events.ERROR, () => {
-        if (!audioState.isActive || audioState.isScPlayingFull) return;
-        mountYouTubeFullSongFallback();
+        if (!audioState.isActive || token !== audioState.runToken || audioState.isScPlayingFull) return;
+        stopAndDestroySoundCloudEngine();
+        mountYouTubeFullSongFallback(token);
       });
     } catch (e) {
-      mountYouTubeFullSongFallback();
+      if (audioState.isActive && token === audioState.runToken) {
+        stopAndDestroySoundCloudEngine();
+        mountYouTubeFullSongFallback(token);
+      }
     }
   });
 
-  // Si en 2.1s el navegador integrado exige un toque posterior o bloquea SC, activar respaldo completo de YouTube + puente temporal
+  // Si SoundCloud es bloqueado o no logra reproducir tras 5.2s, DESTRUIR SoundCloud primero y montar YouTube como único motor
   audioState.scFallbackTimer = setTimeout(() => {
     audioState.scFallbackTimer = null;
-    if (!audioState.isActive || sharedMusicMuted || isFullSongPlayingNow()) return;
-    mountYouTubeFullSongFallback();
-  }, 2100);
+    if (!audioState.isActive || token !== audioState.runToken || sharedMusicMuted || audioState.isScPlayingFull) return;
+    stopAndDestroySoundCloudEngine();
+    mountYouTubeFullSongFallback(token);
+  }, 5200);
 }
 
 /* ==================== MOTOR 2: YOUTUBE IFRAME ("ESCALERAS" COMPLETA 3Ea5h9Xqe3E) ==================== */
-function mountYouTubeFullSongFallback() {
-  if (!audioState.isActive || audioState.isScPlayingFull || audioState.ytContainerEl) return;
+function mountYouTubeFullSongFallback(token) {
+  if (!audioState.isActive || token !== audioState.runToken || sharedMusicMuted) return;
+  if (audioState.activeEngine === 'yt' && audioState.ytContainerEl) return;
 
+  // EXCLUSIVIDAD ESTRICTA: Destruir SoundCloud y silenciar bridge antes de montar YouTube
+  stopAndDestroySoundCloudEngine();
+  stopAndDestroyYouTubeEngine();
+  pauseBridgeAudioSilently();
+
+  audioState.activeEngine = 'yt';
   ensureYtIframeApiLoaded();
 
   const ytContainer = document.createElement('div');
   ytContainer.id = 'blutu-shared-yt-container';
   ytContainer.setAttribute('aria-hidden', 'true');
-  // Sin clip-path:inset(100%) ni z-index:-1 para que WebKit/Blink no suspenda el decodificador de audio
   ytContainer.style.cssText = 'position:fixed;bottom:2px;left:8px;width:4px;height:4px;opacity:0.02;pointer-events:none;z-index:2;overflow:hidden;';
 
   const originVal = (window.location && window.location.origin && window.location.origin !== 'null' && window.location.protocol.startsWith('http'))
     ? encodeURIComponent(window.location.origin)
     : '';
   const originParam = originVal ? `&origin=${originVal}&widget_referrer=${originVal}` : '';
-  const muteParam = sharedMusicMuted ? '1' : '0';
 
   const iframe = document.createElement('iframe');
   iframe.id = 'blutu-shared-yt-iframe';
@@ -683,29 +825,33 @@ function mountYouTubeFullSongFallback() {
   iframe.setAttribute('tabindex', '-1');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.cssText = 'border:0;width:200px;height:200px;pointer-events:none;';
-  iframe.src = `https://www.youtube.com/embed/${GAME_SONG_VIDEO_ID}?autoplay=1&mute=${muteParam}&controls=0&disablekb=1&fs=0&loop=1&playlist=${GAME_SONG_VIDEO_ID}&modestbranding=1&playsinline=1&rel=0&enablejsapi=1${originParam}`;
+  iframe.src = `https://www.youtube.com/embed/${GAME_SONG_VIDEO_ID}?autoplay=1&mute=0&controls=0&disablekb=1&fs=0&loop=1&playlist=${GAME_SONG_VIDEO_ID}&modestbranding=1&playsinline=1&rel=0&enablejsapi=1${originParam}`;
 
   ytContainer.appendChild(iframe);
   (audioState.hostEl || document.body).appendChild(ytContainer);
   audioState.ytContainerEl = ytContainer;
 
   if (window.YT && window.YT.Player) {
-    bindFullSongYouTubePlayer();
+    bindFullSongYouTubePlayer(token);
   } else {
     ytReadyWaiters.push(() => {
-      if (audioState.isActive && !audioState.isScPlayingFull) bindFullSongYouTubePlayer();
+      if (audioState.isActive && token === audioState.runToken && audioState.activeEngine === 'yt') {
+        bindFullSongYouTubePlayer(token);
+      }
     });
   }
 
+  // Si YouTube tampoco logra reproducir tras 4.5s, DESTRUIR YouTube primero y pasar al respaldo directo
   audioState.ytVerifyTimer = setTimeout(() => {
     audioState.ytVerifyTimer = null;
-    if (!audioState.isActive || sharedMusicMuted || isFullSongPlayingNow()) return;
-    activateTemporaryBridgeAudio();
-  }, 1600);
+    if (!audioState.isActive || token !== audioState.runToken || sharedMusicMuted || audioState.isYtPlayingUnmuted) return;
+    stopAndDestroyYouTubeEngine();
+    activateTemporaryBridgeAudio(token);
+  }, 4500);
 }
 
-function bindFullSongYouTubePlayer() {
-  if (!audioState.isActive || audioState.isScPlayingFull) return;
+function bindFullSongYouTubePlayer(token) {
+  if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'yt') return;
   const iframeEl = document.getElementById('blutu-shared-yt-iframe');
   if (!iframeEl || !(window.YT && window.YT.Player)) return;
   if (audioState.ytPlayer) return;
@@ -714,11 +860,12 @@ function bindFullSongYouTubePlayer() {
     audioState.ytPlayer = new window.YT.Player('blutu-shared-yt-iframe', {
       events: {
         onReady: (ev) => {
-          if (!audioState.isActive || audioState.isScPlayingFull) return;
+          if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'yt') return;
           audioState.isYtReady = true;
           try {
             if (sharedMusicMuted) {
               ev.target.mute();
+              ev.target.pauseVideo();
             } else {
               ev.target.unMute();
               ev.target.setVolume(88);
@@ -727,75 +874,108 @@ function bindFullSongYouTubePlayer() {
           } catch (err) {}
         },
         onStateChange: (ev) => {
-          if (!audioState.isActive || audioState.isScPlayingFull) return;
+          if (!audioState.isActive || token !== audioState.runToken || audioState.activeEngine !== 'yt') return;
           if (ev.data === 1) {
+            if (sharedMusicMuted) {
+              try {
+                ev.target.mute();
+                ev.target.pauseVideo();
+              } catch (e) {}
+              return;
+            }
             let currentlyMuted = false;
             try {
-              if (!sharedMusicMuted && typeof ev.target.isMuted === 'function' && ev.target.isMuted()) {
+              if (typeof ev.target.isMuted === 'function' && ev.target.isMuted()) {
                 ev.target.unMute();
                 ev.target.setVolume(88);
               }
               currentlyMuted = typeof ev.target.isMuted === 'function' ? ev.target.isMuted() : false;
             } catch (e) {}
 
-            if (!sharedMusicMuted && !currentlyMuted) {
-              onFullSongConfirmedPlaying('yt');
+            if (!currentlyMuted) {
+              onFullSongConfirmedPlaying('yt', token);
             }
           } else if (ev.data === 0) {
             try {
               ev.target.seekTo(0, true);
-              ev.target.playVideo();
+              if (!sharedMusicMuted) ev.target.playVideo();
             } catch (err) {}
           }
         },
         onError: () => {
-          if (!audioState.isActive || isFullSongPlayingNow()) return;
-          activateTemporaryBridgeAudio();
+          if (!audioState.isActive || token !== audioState.runToken || audioState.isYtPlayingUnmuted) return;
+          stopAndDestroyYouTubeEngine();
+          activateTemporaryBridgeAudio(token);
         }
       }
     });
   } catch (e) {
-    if (!isFullSongPlayingNow()) activateTemporaryBridgeAudio();
+    if (audioState.isActive && token === audioState.runToken && !audioState.isYtPlayingUnmuted) {
+      stopAndDestroyYouTubeEngine();
+      activateTemporaryBridgeAudio(token);
+    }
   }
 }
 
-function tryPromoteFullSongOnUserGesture() {
+function promoteCurrentSingleEngineOnGesture() {
   if (!audioState.isActive || sharedMusicMuted) return false;
 
-  // 1. Intentar activar/reanudar el reproductor completo de SoundCloud dentro del gesto directo del usuario (clave en Instagram iOS/Android)
-  if (audioState.scWidget && audioState.isScReady) {
-    try {
-      audioState.scWidget.setVolume(88);
-      audioState.scWidget.play();
-    } catch (e) {}
-  } else if (audioState.scIframeEl) {
-    sendScPostMessage('setVolume', 88);
-    sendScPostMessage('play');
+  if (audioState.activeEngine === 'sc') {
+    if (audioState.scWidget && audioState.isScReady) {
+      try {
+        audioState.scWidget.setVolume(88);
+        audioState.scWidget.isPaused((paused) => {
+          if (paused && audioState.isActive && audioState.activeEngine === 'sc' && !sharedMusicMuted) {
+            try { audioState.scWidget.play(); } catch (e) {}
+          }
+        });
+      } catch (e) {}
+    } else if (audioState.scIframeEl && !audioState.isScPlayingFull) {
+      sendScPostMessage('setVolume', 88);
+      sendScPostMessage('play');
+    }
+    return audioState.isScPlayingFull;
   }
 
-  // 2. Si el respaldo de YouTube está montado y aún no ha arrancado, empujarlo también con el gesto
-  if (!audioState.isScPlayingFull) {
+  if (audioState.activeEngine === 'yt') {
     if (audioState.ytPlayer && audioState.isYtReady) {
       try {
         if (typeof audioState.ytPlayer.unMute === 'function') audioState.ytPlayer.unMute();
         if (typeof audioState.ytPlayer.setVolume === 'function') audioState.ytPlayer.setVolume(88);
         const st = typeof audioState.ytPlayer.getPlayerState === 'function' ? audioState.ytPlayer.getPlayerState() : -1;
-        if (st !== 1 && typeof audioState.ytPlayer.playVideo === 'function') {
+        if (st !== 1 && st !== 3 && typeof audioState.ytPlayer.playVideo === 'function') {
           audioState.ytPlayer.playVideo();
         }
-        if (st === 1) return true;
+        return st === 1;
       } catch (e) {}
     } else if (document.getElementById('blutu-shared-yt-iframe')) {
       sendYtPostMessage('unMute');
       sendYtPostMessage('setVolume', [88]);
       sendYtPostMessage('playVideo');
     }
+    return audioState.isYtPlayingUnmuted;
   }
 
-  return isFullSongPlayingNow();
+  if (audioState.activeEngine === 'bridge' && audioState.usingBridgeAudio && audioState.bridgeAudio) {
+    try {
+      audioState.bridgeAudio.muted = false;
+      audioState.bridgeAudio.volume = 0.88;
+      if (audioState.bridgeAudio.paused) {
+        const p = audioState.bridgeAudio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+      return true;
+    } catch (e) {}
+  }
+
+  return false;
 }
 
 export function startSharedGameMusic(hostEl, muteBtnId) {
+  if (typeof window !== 'undefined' && typeof window.__blutuSharedMusicMuted === 'boolean') {
+    sharedMusicMuted = window.__blutuSharedMusicMuted;
+  }
+
   const preservedPrimed = (typeof window !== 'undefined' && window.__blutuPrimedGestureAudio)
     ? window.__blutuPrimedGestureAudio
     : null;
@@ -809,7 +989,9 @@ export function startSharedGameMusic(hostEl, muteBtnId) {
     window.__blutuPrimedGestureAudio = preservedPrimed;
   }
 
+  const token = ++audioState.runToken;
   audioState.isActive = true;
+  audioState.activeEngine = 'none';
   audioState.hostEl = hostEl || document.body;
   audioState.isScReady = false;
   audioState.isScPlayingFull = false;
@@ -827,52 +1009,27 @@ export function startSharedGameMusic(hostEl, muteBtnId) {
 
   unlockSharedWebViewAudioSession();
 
-  // Preparar el elemento <audio> desbloqueado en silencio como red de seguridad sin cortar la canción completa
+  // Preparar el elemento <audio> desbloqueado en silencio absoluto como respaldo futuro sin sonar jamás encima
   ensureBridgeAudioMountedSynchronously(false);
 
-  // Iniciar canción completa ("Escaleras" 1:44) tanto en Instagram / WebViews como en navegadores móviles y escritorio
-  mountSoundCloudFullSongEngine();
+  // Si el usuario silenció la música antes de entrar al juego, no montar ni reproducir ningún motor hasta que reactive el sonido
+  if (sharedMusicMuted) {
+    return;
+  }
+
+  mountSoundCloudFullSongEngine(token);
 }
 
 export function notifySharedGameUserGesture() {
   if (!audioState.isActive || sharedMusicMuted) return;
   unlockSharedWebViewAudioSession();
 
-  if (audioState.isScPlayingFull && audioState.scWidget && audioState.isScReady) {
-    try {
-      audioState.scWidget.isPaused((paused) => {
-        if (paused && audioState.isActive && !sharedMusicMuted) {
-          audioState.scWidget.setVolume(88);
-          audioState.scWidget.play();
-        }
-      });
-    } catch (e) {}
+  if (audioState.activeEngine === 'none') {
+    mountSoundCloudFullSongEngine(audioState.runToken);
     return;
   }
 
-  if (audioState.isYtPlayingUnmuted && audioState.ytPlayer && audioState.isYtReady) {
-    try {
-      const st = typeof audioState.ytPlayer.getPlayerState === 'function' ? audioState.ytPlayer.getPlayerState() : 1;
-      if (st !== 1 && st !== 3) {
-        audioState.ytPlayer.unMute();
-        audioState.ytPlayer.setVolume(88);
-        audioState.ytPlayer.playVideo();
-      }
-    } catch (e) {}
-    return;
-  }
-
-  // Cada toque dentro del juego impulsa la reproducción de la canción completa en WebViews estrictos (Instagram)
-  tryPromoteFullSongOnUserGesture();
-
-  if (audioState.usingBridgeAudio && audioState.bridgeAudio && audioState.bridgeAudio.paused && !isFullSongPlayingNow()) {
-    try {
-      audioState.bridgeAudio.muted = false;
-      audioState.bridgeAudio.volume = 0.88;
-      const p = audioState.bridgeAudio.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } catch (e) {}
-  }
+  promoteCurrentSingleEngineOnGesture();
 }
 
 export function pauseSharedGameMusicTemporary() {
@@ -894,15 +1051,24 @@ export function pauseSharedGameMusicTemporary() {
 
 export function toggleSharedGameMute() {
   unlockSharedWebViewAudioSession();
-  sharedMusicMuted = !sharedMusicMuted;
-  if (typeof window !== 'undefined') {
-    window.__blutuSharedMusicMuted = sharedMusicMuted;
+  if (typeof window !== 'undefined' && typeof window.__blutuSharedMusicMuted === 'boolean') {
+    sharedMusicMuted = window.__blutuSharedMusicMuted;
   }
+  sharedMusicMuted = !sharedMusicMuted;
+  persistMutedState(sharedMusicMuted);
   syncAllMuteButtonsUI();
 
   if (!audioState.isActive) return sharedMusicMuted;
 
   if (sharedMusicMuted) {
+    if (audioState.scFallbackTimer) {
+      clearTimeout(audioState.scFallbackTimer);
+      audioState.scFallbackTimer = null;
+    }
+    if (audioState.ytVerifyTimer) {
+      clearTimeout(audioState.ytVerifyTimer);
+      audioState.ytVerifyTimer = null;
+    }
     if (audioState.bridgeAudio) {
       try {
         audioState.bridgeAudio.muted = true;
@@ -919,23 +1085,28 @@ export function toggleSharedGameMute() {
       sendScPostMessage('pause');
     }
     if (audioState.ytPlayer && audioState.isYtReady) {
-      try { audioState.ytPlayer.mute(); } catch (e) {}
+      try {
+        audioState.ytPlayer.mute();
+        audioState.ytPlayer.pauseVideo();
+      } catch (e) {}
     } else if (audioState.ytContainerEl) {
       sendYtPostMessage('mute');
+      sendYtPostMessage('pauseVideo');
     }
   } else {
-    const promoted = tryPromoteFullSongOnUserGesture();
-    if (!promoted && !isFullSongPlayingNow() && !audioState.scContainerEl && !audioState.ytContainerEl) {
-      mountSoundCloudFullSongEngine();
-    } else if (!promoted && !isFullSongPlayingNow() && audioState.usingBridgeAudio) {
-      activateTemporaryBridgeAudio();
+    if (audioState.activeEngine === 'none') {
+      mountSoundCloudFullSongEngine(audioState.runToken);
+    } else {
+      promoteCurrentSingleEngineOnGesture();
     }
   }
   return sharedMusicMuted;
 }
 
 export function stopAndDestroySharedGameMusic(keepMuteBtns = false) {
+  audioState.runToken++;
   audioState.isActive = false;
+  audioState.activeEngine = 'none';
   audioState.hostEl = null;
 
   if (!keepMuteBtns) {
@@ -948,26 +1119,18 @@ export function stopAndDestroySharedGameMusic(keepMuteBtns = false) {
 }
 
 if (typeof window !== 'undefined') {
-  window.__blutuSharedMusicMuted = sharedMusicMuted;
+  persistMutedState(sharedMusicMuted);
   window.toggleSharedGameMute = toggleSharedGameMute;
+  window.isSharedGameMusicMuted = isSharedGameMusicMuted;
+  window.registerSharedMuteButton = registerSharedMuteButton;
+  window.syncAllMuteButtonsUI = syncAllMuteButtonsUI;
+
   document.addEventListener('visibilitychange', () => {
     if (!audioState.isActive) return;
     if (document.hidden) {
       pauseSharedGameMusicTemporary();
     } else if (!sharedMusicMuted) {
-      if (audioState.isScPlayingFull && audioState.scWidget && audioState.isScReady) {
-        try {
-          audioState.scWidget.setVolume(88);
-          audioState.scWidget.play();
-        } catch (e) {}
-      } else if (audioState.isYtPlayingUnmuted && audioState.ytPlayer && audioState.isYtReady) {
-        try { audioState.ytPlayer.playVideo(); } catch (e) {}
-      } else if (audioState.usingBridgeAudio && audioState.bridgeAudio) {
-        try {
-          const p = audioState.bridgeAudio.play();
-          if (p && typeof p.catch === 'function') p.catch(() => {});
-        } catch (e) {}
-      }
+      promoteCurrentSingleEngineOnGesture();
     }
   });
 }

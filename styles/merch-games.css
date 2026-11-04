@@ -1446,17 +1446,75 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 14px;
-      margin-top: 30px;
+      gap: 11px;
+      margin: 28px auto 4px auto;
       width: 100%;
+      max-width: 344px;
+      box-sizing: border-box;
     }
 
-    .game-blog-modes-row {
+    .game-blog-pregame-audio-row {
       display: flex;
       justify-content: center;
       align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+
+    .game-pregame-mute-btn {
+      appearance: none;
+      -webkit-appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 46px;
+      min-width: 64px;
+      min-height: 46px;
+      padding: 0;
+      border-radius: 14px 14px 5px 5px;
+      background: rgba(11, 15, 25, 0.78);
+      border: 1px solid rgba(140, 162, 230, 0.36);
+      color: rgba(196, 209, 244, 0.84);
+      font-size: 1.24rem;
+      cursor: pointer;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 2px 8px rgba(0, 0, 0, 0.55);
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease, transform 0.15s ease;
+    }
+
+    .game-pregame-mute-btn i {
+      font-size: 1.24rem;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .game-pregame-mute-btn:hover {
+      border-color: rgba(176, 194, 246, 0.65);
+      color: var(--white);
+      background: rgba(16, 22, 36, 0.88);
+    }
+
+    .game-pregame-mute-btn:active {
+      transform: scale(0.96);
+    }
+
+    .game-pregame-mute-btn.is-muted {
+      color: rgba(160, 174, 212, 0.44);
+      border-color: rgba(140, 162, 230, 0.2);
+      background: rgba(7, 9, 15, 0.68);
+      box-shadow: none;
+    }
+
+    .game-blog-modes-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
       width: 100%;
     }
 
@@ -1467,20 +1525,30 @@
       --game-btn-glow: rgba(90, 116, 191, 0.45);
       appearance: none;
       -webkit-appearance: none;
-      background: var(--game-btn-bg);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 48%, rgba(0, 0, 0, 0.28) 100%),
+        var(--game-btn-bg);
       color: var(--game-btn-text);
       border: 1px solid var(--game-btn-border);
       font-family: 'Cinzel', serif;
-      font-size: 0.92rem;
+      font-size: 0.86rem;
       font-weight: 700;
-      letter-spacing: 1px;
-      padding: 11px 24px;
+      letter-spacing: 0.9px;
+      line-height: 1.15;
+      padding: 11px 14px;
       min-height: 44px;
-      min-width: 128px;
-      border-radius: 18px 18px 6px 6px;
+      min-width: 0;
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 15px 15px 5px 5px;
       cursor: pointer;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.72), 0 0 14px var(--game-btn-glow);
-      transition: transform 0.18s ease, filter 0.2s ease, box-shadow 0.2s ease;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+        0 4px 14px rgba(0, 0, 0, 0.72),
+        0 0 14px var(--game-btn-glow);
+      transition: transform 0.16s ease, filter 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
       user-select: none;
@@ -1488,14 +1556,19 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 7px;
       text-align: center;
+      white-space: nowrap;
     }
 
     .game-custom-btn:hover {
-      transform: translateY(-2px);
-      filter: brightness(1.12);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.84), 0 0 20px var(--game-btn-glow);
+      transform: translateY(-1.5px);
+      filter: brightness(1.1);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+        0 6px 18px rgba(0, 0, 0, 0.84),
+        0 0 20px var(--game-btn-glow);
     }
 
     .game-custom-btn:active {
@@ -1503,7 +1576,11 @@
     }
 
     .game-custom-btn.is-volver-btn {
-      min-width: 140px;
+      min-width: 0;
+    }
+
+    .game-custom-btn.is-full-row-btn {
+      width: 100%;
     }
 
     /* PANEL DE CONFIGURACIÓN DE JUEGOS DENTRO DEL EDITOR DEL BLOG */
@@ -1570,20 +1647,18 @@
     }
 
     .game-blog-vspc-subrow {
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-      flex-wrap: wrap;
       width: 100%;
       animation: modalFadeIn 0.2s ease;
     }
 
     .game-custom-btn.is-submode-btn {
-      min-width: 112px;
-      min-height: 40px;
-      padding: 9px 18px;
-      font-size: 0.84rem;
+      min-width: 0;
+      min-height: 42px;
+      padding: 9px 12px;
+      font-size: 0.82rem;
     }
 
     .memorama-pair-slot-card {
@@ -2162,34 +2237,73 @@
       filter: drop-shadow(0 0 16px rgba(140, 162, 230, 0.28));
     }
 
-    /* ESCENARIO Y TARJETA GÓTICA DE FIN DE PARTIDA + VUELO DE MURCIÉLAGOS DETRÁS AL GANAR */
+    /* ESCENARIO Y TARJETA GÓTICA DE FIN DE PARTIDA + CORREDORES FRONTALES DE MURCIÉLAGOS ADELANTE DE LA TARJETA SIN CUBRIR TEXTO NI BOTONES */
     .minigame-result-stage {
       position: relative;
       width: 100%;
-      min-height: 330px;
-      padding: 22px 10px 14px 10px;
+      min-height: 340px;
+      padding: 22px 16px 18px 16px;
       display: flex;
       align-items: center;
       justify-content: center;
       box-sizing: border-box;
       overflow: hidden;
       isolation: isolate;
+      animation: minigameResultCardRise 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
     }
 
-    .minigame-win-bats-layer {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
+    .minigame-result-stage.is-win-stage {
+      min-height: 388px;
+      padding: 24px 22px 22px 22px;
+      background: radial-gradient(ellipse at 50% 38%, rgba(111, 142, 230, 0.22) 0%, transparent 72%);
+    }
+
+    .minigame-card-bat-corridor {
+      position: relative;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       pointer-events: none;
-      overflow: hidden;
+      z-index: 4;
+      overflow: visible;
+    }
+
+    .minigame-card-bat-corridor.is-top-corridor {
+      min-height: 38px;
+      margin-bottom: 2px;
+    }
+
+    .minigame-card-bat-corridor.is-mid-corridor {
+      min-height: 30px;
+      margin: 3px 0;
+    }
+
+    .minigame-card-bat-corridor.is-bottom-corridor {
+      min-height: 24px;
+      margin-top: 2px;
+    }
+
+    .minigame-corridor-bats {
+      position: absolute;
+      top: -6px;
+      bottom: -6px;
+      left: -28px;
+      right: -28px;
+      z-index: 4;
+      pointer-events: none;
+      overflow: visible;
+      -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.68) 12%, #000 26%, #000 74%, rgba(0, 0, 0, 0.68) 88%, transparent 100%);
+      mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.68) 12%, #000 26%, #000 74%, rgba(0, 0, 0, 0.68) 88%, transparent 100%);
     }
 
     .minigame-win-bat {
       position: absolute;
-      top: var(--bat-top, 40%);
-      width: var(--bat-size, 36px);
-      height: calc(var(--bat-size, 36px) * 0.56);
-      color: var(--blog-title-color, #9fb4f2);
+      top: var(--bat-top, 14%);
+      width: var(--bat-size, 48px);
+      height: calc(var(--bat-size, 48px) * 0.65);
+      color: #cad8fc;
+      color: color-mix(in srgb, var(--blog-title-color, #b4c8ff) 74%, #e8eeff);
       opacity: 0;
       pointer-events: none;
       will-change: transform, opacity;
@@ -2197,12 +2311,12 @@
 
     .minigame-win-bat.is-ltr {
       left: 0;
-      animation: minigameBatSoarLtr var(--bat-dur, 4.4s) linear var(--bat-delay, 0s) infinite;
+      animation: minigameBatSoarLtr var(--bat-dur, 4.1s) linear var(--bat-delay, 0s) infinite;
     }
 
     .minigame-win-bat.is-rtl {
       right: 0;
-      animation: minigameBatSoarRtl var(--bat-dur, 4.4s) linear var(--bat-delay, 0s) infinite;
+      animation: minigameBatSoarRtl var(--bat-dur, 4.1s) linear var(--bat-delay, 0s) infinite;
     }
 
     .minigame-win-bat-svg {
@@ -2214,107 +2328,124 @@
     }
 
     .minigame-bat-wing-l {
-      transform-origin: 30px 20px;
-      animation: minigameBatWingFlapL var(--bat-flap, 0.24s) ease-in-out infinite alternate;
+      transform-origin: 32px 21px;
+      will-change: transform;
+      animation: minigameBatWingFlapL var(--bat-flap, 0.22s) ease-in-out infinite alternate;
     }
 
     .minigame-bat-wing-r {
-      transform-origin: 34px 20px;
-      animation: minigameBatWingFlapR var(--bat-flap, 0.24s) ease-in-out infinite alternate;
+      transform-origin: 36px 21px;
+      will-change: transform;
+      animation: minigameBatWingFlapR var(--bat-flap, 0.22s) ease-in-out infinite alternate;
     }
 
     @keyframes minigameBatWingFlapL {
-      0% { transform: rotate(-22deg) scaleY(0.76); }
-      100% { transform: rotate(18deg) scaleY(1.06); }
+      0% { transform: rotate(-26deg) scaleY(0.72); }
+      100% { transform: rotate(20deg) scaleY(1.08); }
     }
 
     @keyframes minigameBatWingFlapR {
-      0% { transform: rotate(22deg) scaleY(0.76); }
-      100% { transform: rotate(-18deg) scaleY(1.06); }
+      0% { transform: rotate(26deg) scaleY(0.72); }
+      100% { transform: rotate(-20deg) scaleY(1.08); }
     }
 
     @keyframes minigameBatSoarLtr {
       0% {
         opacity: 0;
-        transform: translate3d(-64px, 14px, 0) rotate(-7deg) scale(0.86);
+        transform: translate3d(-44px, 4px, 0) rotate(-8deg) scale(0.9);
       }
-      12% {
-        opacity: 0.72;
+      16% {
+        opacity: var(--bat-op, 0.74);
       }
       50% {
-        opacity: 0.85;
-        transform: translate3d(260px, var(--bat-drift, -24px), 0) rotate(5deg) scale(1.04);
+        opacity: var(--bat-op, 0.74);
+        transform: translate3d(186px, var(--bat-drift, -4px), 0) rotate(5deg) scale(1.04);
       }
-      88% {
-        opacity: 0.68;
+      84% {
+        opacity: var(--bat-op, 0.74);
       }
       100% {
         opacity: 0;
-        transform: translate3d(580px, calc(var(--bat-drift, -24px) * 1.45), 0) rotate(-4deg) scale(0.9);
+        transform: translate3d(420px, calc(var(--bat-drift, -4px) * 1.15), 0) rotate(-4deg) scale(0.92);
       }
     }
 
     @keyframes minigameBatSoarRtl {
       0% {
         opacity: 0;
-        transform: translate3d(64px, 14px, 0) rotate(7deg) scale(0.86);
+        transform: translate3d(44px, 4px, 0) rotate(8deg) scale(0.9);
       }
-      12% {
-        opacity: 0.72;
+      16% {
+        opacity: var(--bat-op, 0.74);
       }
       50% {
-        opacity: 0.85;
-        transform: translate3d(-260px, var(--bat-drift, -24px), 0) rotate(-5deg) scale(1.04);
+        opacity: var(--bat-op, 0.74);
+        transform: translate3d(-186px, var(--bat-drift, -4px), 0) rotate(-5deg) scale(1.04);
       }
-      88% {
-        opacity: 0.68;
+      84% {
+        opacity: var(--bat-op, 0.74);
       }
       100% {
         opacity: 0;
-        transform: translate3d(-580px, calc(var(--bat-drift, -24px) * 1.45), 0) rotate(4deg) scale(0.9);
+        transform: translate3d(-420px, calc(var(--bat-drift, -4px) * 1.15), 0) rotate(4deg) scale(0.92);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .minigame-win-bat,
+      .minigame-bat-wing-l,
+      .minigame-bat-wing-r {
+        animation: none !important;
       }
     }
 
     .minigame-result-card {
       position: relative;
-      z-index: 2;
+      isolation: isolate;
+      overflow: visible;
       width: 100%;
-      max-width: 410px;
-      padding: 26px 24px 22px 24px;
+      max-width: 382px;
+      padding: 24px 22px 20px 22px;
       box-sizing: border-box;
       text-align: center;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       border-radius: 44px 44px 12px 12px;
       background:
-        radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--blog-accent, #5a74bf) 22%, transparent) 0%, transparent 68%),
-        linear-gradient(180deg, rgba(14, 17, 28, 0.94) 0%, rgba(6, 7, 13, 0.97) 100%);
-      border: 1px solid color-mix(in srgb, var(--blog-accent, #5a74bf) 74%, rgba(255, 255, 255, 0.24));
+        radial-gradient(ellipse at 50% 0%, rgba(90, 116, 191, 0.22) 0%, transparent 68%),
+        linear-gradient(180deg, rgba(14, 17, 28, 0.95) 0%, rgba(6, 7, 13, 0.98) 100%);
+      border: 1px solid rgba(132, 158, 232, 0.72);
       box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.16),
         inset 0 0 24px rgba(0, 0, 0, 0.78),
         0 0 28px var(--blog-glow, rgba(90, 116, 191, 0.34)),
         0 14px 36px rgba(0, 0, 0, 0.88);
-      animation: minigameResultCardRise 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
     }
 
     .minigame-result-card::before {
       content: "";
       position: absolute;
       inset: 6px;
+      z-index: 1;
       border-radius: 38px 38px 8px 8px;
       border: 1px solid rgba(140, 162, 230, 0.18);
       pointer-events: none;
     }
 
     .minigame-result-card.is-victory {
-      border-color: color-mix(in srgb, var(--blog-title-color, #9fb4f2) 82%, rgba(255, 255, 255, 0.32));
+      max-width: 360px;
+      padding: 18px 22px 14px 22px;
+      gap: 6px;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(90, 116, 191, 0.26) 0%, transparent 68%),
+        linear-gradient(180deg, rgba(12, 16, 28, 0.95) 0%, rgba(6, 8, 14, 0.98) 100%);
+      border: 1.5px solid rgba(168, 190, 250, 0.86);
       box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.22),
-        inset 0 0 26px color-mix(in srgb, var(--blog-accent, #5a74bf) 18%, rgba(0, 0, 0, 0.72)),
-        0 0 34px var(--blog-glow, rgba(140, 162, 230, 0.46)),
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        inset 0 0 26px rgba(20, 30, 58, 0.72),
+        0 0 34px var(--blog-glow, rgba(140, 162, 230, 0.48)),
         0 16px 40px rgba(0, 0, 0, 0.9);
     }
 
@@ -2336,6 +2467,8 @@
     }
 
     .minigame-card-crest {
+      position: relative;
+      z-index: 1;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -2359,6 +2492,16 @@
       filter: drop-shadow(0 0 8px var(--blog-glow, rgba(140, 162, 230, 0.6)));
       user-select: none;
       pointer-events: none;
+    }
+
+    .minigame-result-kicker,
+    .minigame-result-title,
+    .minigame-six-complete-badge,
+    .minigame-duel-scoreboard,
+    .minigame-victory-time-readout,
+    .minigame-result-buttons {
+      position: relative;
+      z-index: 6;
     }
 
     .minigame-result-kicker {
@@ -2474,7 +2617,36 @@
       user-select: none;
     }
 
+    .minigame-victory-time-readout {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 10px;
+      margin: 2px 0 0 0;
+    }
+
+    .minigame-victory-time-label {
+      font-family: 'Cinzel', serif;
+      font-size: 0.72rem;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: var(--text-muted, #9aa4bf);
+    }
+
+    .minigame-victory-time-value {
+      font-family: 'Cinzel', serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-feature-settings: "lnum" 1, "tnum" 1;
+      font-size: 1.18rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: var(--white);
+      text-shadow: 0 0 14px var(--blog-glow, rgba(140, 162, 230, 0.65));
+    }
+
     .minigame-card-divider {
+      position: relative;
+      z-index: 1;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -2496,31 +2668,48 @@
     .minigame-result-buttons {
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: 10px;
-      margin-top: 4px;
+      align-items: stretch;
+      gap: 9px;
+      margin: 4px auto 4px auto;
       width: 100%;
+      max-width: 318px;
+      box-sizing: border-box;
     }
 
     .minigame-result-primary-row {
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 9px;
-      flex-wrap: wrap;
       width: 100%;
     }
 
     @media (max-width: 520px) {
       .minigame-result-stage {
         min-height: 300px;
-        padding: 16px 4px 10px 4px;
+        padding: 14px 12px 12px 12px;
+      }
+      .minigame-result-stage.is-win-stage {
+        min-height: 356px;
+        padding: 16px 14px 14px 14px;
       }
       .minigame-result-card {
-        padding: 22px 16px 18px 16px;
+        padding: 20px 16px 16px 16px;
         border-radius: 36px 36px 10px 10px;
+      }
+      .minigame-result-card.is-victory {
+        max-width: 334px;
+        padding: 15px 16px 12px 16px;
       }
       .minigame-result-card::before {
         border-radius: 31px 31px 7px 7px;
+      }
+      .minigame-corridor-bats {
+        left: -20px;
+        right: -20px;
+      }
+      .game-custom-btn {
+        font-size: 0.81rem;
+        letter-spacing: 0.6px;
+        padding: 10px 10px;
       }
     }

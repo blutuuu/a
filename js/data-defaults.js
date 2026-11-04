@@ -1,5 +1,5 @@
 /* Blutu — Datos Iniciales por Defecto y Esquemas de Juegos */
-export const BLUTU_BUILD_TIMESTAMP = 1793130000000;
+export const BLUTU_BUILD_TIMESTAMP = 1793150000000;
 
     /* BASE DE DATOS DE PUBLICACIONES DE BLOG */
     export const DEFAULT_POSTS_DATA = [

@@ -338,25 +338,91 @@ function primeSynchronousGestureAudio() {
       } catch (e) {}
       const a = document.createElement("audio");
       a.id = "blutu-shared-direct-audio";
-      a.preload = "auto";
+      a.preload = "none";
       a.loop = true;
       a.playsInline = true;
       a.setAttribute("playsinline", "");
       a.setAttribute("webkit-playsinline", "");
       a.style.display = "none";
       a.volume = 0.88;
-      a.muted = Boolean(window.__blutuSharedMusicMuted);
+      // Desbloquear siempre en silencio absoluto para evitar que suene doble mientras carga el motor principal
+      a.muted = true;
       a.src = streamUrl;
       if (document.body) {
         document.body.appendChild(a);
       }
-      if (!a.muted) {
-        const p = a.play();
-        if (p && typeof p.catch === "function") p.catch(() => {});
+      const p = a.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          if (window.__blutuPrimedGestureAudio === a) {
+            a.muted = true;
+            a.pause();
+            a.currentTime = 0;
+          }
+        }).catch(() => {});
       }
       window.__blutuPrimedGestureAudio = a;
     }
   } catch (e) {}
+}
+
+try {
+  sessionStorage.removeItem("blutu_shared_music_muted");
+} catch (e) {}
+if (typeof window.__blutuSharedMusicMuted !== "boolean") {
+  window.__blutuSharedMusicMuted = false;
+}
+
+function isPreGameMusicMuted() {
+  if (typeof window.isSharedGameMusicMuted === "function") {
+    return Boolean(window.isSharedGameMusicMuted());
+  }
+  if (typeof window.__blutuSharedMusicMuted === "boolean") {
+    return window.__blutuSharedMusicMuted;
+  }
+  return false;
+}
+
+function applyPreGameMuteBtnVisual(btnEl, muted) {
+  if (!btnEl) return;
+  const label = muted ? "Activar música" : "Silenciar música";
+  const iconClass = muted ? "fa-volume-xmark" : "fa-volume-high";
+  btnEl.classList.toggle("is-muted", muted);
+  btnEl.setAttribute("aria-label", label);
+  btnEl.setAttribute("aria-pressed", muted ? "true" : "false");
+  btnEl.title = label;
+  btnEl.innerHTML = `<i class="fa-solid ${iconClass}" aria-hidden="true"></i>`;
+}
+
+function renderPreGameMuteControlHTML() {
+  const muted = isPreGameMusicMuted();
+  const label = muted ? "Activar música" : "Silenciar música";
+  const iconClass = muted ? "fa-volume-xmark" : "fa-volume-high";
+  return `
+    <div class="game-blog-pregame-audio-row">
+      <button type="button" id="preGameMuteBtn" class="game-pregame-mute-btn${muted ? " is-muted" : ""}" aria-label="${label}" aria-pressed="${muted ? "true" : "false"}" title="${label}" onclick="togglePreGameMusicMute()"><i class="fa-solid ${iconClass}" aria-hidden="true"></i></button>
+    </div>
+  `;
+}
+
+function togglePreGameMusicMute() {
+  if (typeof window.toggleSharedGameMute === "function") {
+    if (typeof window.registerSharedMuteButton === "function") {
+      window.registerSharedMuteButton("preGameMuteBtn");
+    }
+    const nextMuted = window.toggleSharedGameMute();
+    applyPreGameMuteBtnVisual(document.getElementById("preGameMuteBtn"), Boolean(nextMuted));
+    return nextMuted;
+  }
+  const nextMuted = !isPreGameMusicMuted();
+  window.__blutuSharedMusicMuted = nextMuted;
+  applyPreGameMuteBtnVisual(document.getElementById("preGameMuteBtn"), nextMuted);
+  ensureGamesEngineLoaded().then(() => {
+    if (typeof window.registerSharedMuteButton === "function") {
+      window.registerSharedMuteButton("preGameMuteBtn");
+    }
+  });
+  return nextMuted;
 }
 
 const logoBtnEl = document.getElementById("logoBtn");
@@ -2661,6 +2727,7 @@ try {
         return `
           ${adminPanelHTML}
           <div class="game-blog-actions-stack" contenteditable="false">
+            ${renderPreGameMuteControlHTML()}
             <div class="game-blog-modes-row">
               <button type="button" id="memoramaSoloLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(soloHex)}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
               <button type="button" id="memoramaVsPcLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(vsPcHex)}" onclick="toggleMemoramaVsPcDifficultyRow('blogVsPcDiffRow')">Vs PC</button>
@@ -2716,6 +2783,7 @@ try {
       return `
         ${adminSixHTML}
         <div class="game-blog-actions-stack" contenteditable="false">
+          ${renderPreGameMuteControlHTML()}
           <div class="game-blog-modes-row">
             <button type="button" id="sixEasyLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(easyHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
             <button type="button" id="sixHardLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(hardHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
@@ -2813,6 +2881,18 @@ try {
         `;
       }
 
+      if (gameKey === 'memorama' || gameKey === 'sixbysix') {
+        if (typeof window.registerSharedMuteButton === 'function') {
+          window.registerSharedMuteButton('preGameMuteBtn');
+        } else {
+          ensureGamesEngineLoaded().then(() => {
+            if (typeof window.registerSharedMuteButton === 'function') {
+              window.registerSharedMuteButton('preGameMuteBtn');
+            }
+          });
+        }
+      }
+
       syncBlogParagraphFirstLetterColors(modalBody);
 
       modalEl.style.display = 'flex';
@@ -2894,7 +2974,7 @@ try {
       const targetRow = document.getElementById(rowId || 'blogVsPcDiffRow');
       if (!targetRow) return;
       const isHidden = targetRow.style.display === 'none' || !targetRow.style.display;
-      targetRow.style.display = isHidden ? 'flex' : 'none';
+      targetRow.style.display = isHidden ? 'grid' : 'none';
     }
     window.toggleMemoramaVsPcDifficultyRow = toggleMemoramaVsPcDifficultyRow;
 
@@ -12428,6 +12508,7 @@ Object.assign(window, {
   reconcileAndMergePosts,
   preloadEasterEggModule,
   primeSynchronousGestureAudio,
+  togglePreGameMusicMute,
   ensureGamesEngineLoaded,
   destroyActiveMiniGame,
   launchMiniGameFromBlog,
