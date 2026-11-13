@@ -271,29 +271,8 @@ initMobileAppDeepLinks();
 // ---------------------------------------------------------------------------
 let easterEggModulePromise = null;
 let easterEggModuleRef = null;
-let gestureUnlockAudioCtx = null;
-let escalerasUrlWarmupStarted = false;
-const FALLBACK_ESCALERAS_AUDIO_URL = "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/ec/fb/45/ecfb4526-93d2-03e7-c901-a297111f1458/mzaf_14659704648749163645.plus.aac.p.m4a";
-
-function warmUpEscalerasStreamUrlOnce() {
-  if (escalerasUrlWarmupStarted) return;
-  escalerasUrlWarmupStarted = true;
-  try {
-    if (sessionStorage.getItem("blutu_escaleras_audio_url")) return;
-  } catch (e) {}
-  fetch("https://itunes.apple.com/lookup?id=6773560493&entity=song", { mode: "cors", credentials: "omit" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      const hit = data && Array.isArray(data.results) ? data.results.find((it) => it && it.previewUrl) : null;
-      if (hit && hit.previewUrl) {
-        try { sessionStorage.setItem("blutu_escaleras_audio_url", hit.previewUrl); } catch (e) {}
-      }
-    })
-    .catch(() => {});
-}
 
 function preloadEasterEggModule() {
-  warmUpEscalerasStreamUrlOnce();
   if (!easterEggModulePromise) {
     easterEggModulePromise = import("./easter-egg.js").then((mod) => {
       easterEggModuleRef = mod;
@@ -307,124 +286,6 @@ function preloadEasterEggModule() {
   return easterEggModulePromise;
 }
 
-function primeSynchronousGestureAudio() {
-  try {
-    if (navigator.audioSession && navigator.audioSession.type !== "playback") {
-      navigator.audioSession.type = "playback";
-    }
-  } catch (e) {}
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (AudioCtx) {
-      if (!gestureUnlockAudioCtx || gestureUnlockAudioCtx.state === "closed") {
-        gestureUnlockAudioCtx = new AudioCtx();
-      }
-      if (gestureUnlockAudioCtx.state === "suspended") {
-        gestureUnlockAudioCtx.resume().catch(() => {});
-      }
-      const buf = gestureUnlockAudioCtx.createBuffer(1, 1, 22050);
-      const src = gestureUnlockAudioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(gestureUnlockAudioCtx.destination);
-      src.start(0);
-    }
-  } catch (e) {}
-  try {
-    if (!window.__blutuPrimedGestureAudio) {
-      let streamUrl = FALLBACK_ESCALERAS_AUDIO_URL;
-      try {
-        const cached = sessionStorage.getItem("blutu_escaleras_audio_url");
-        if (cached && /^https:\/\//i.test(cached)) streamUrl = cached;
-      } catch (e) {}
-      const a = document.createElement("audio");
-      a.id = "blutu-shared-direct-audio";
-      a.preload = "none";
-      a.loop = true;
-      a.playsInline = true;
-      a.setAttribute("playsinline", "");
-      a.setAttribute("webkit-playsinline", "");
-      a.style.display = "none";
-      a.volume = 0.88;
-      // Desbloquear siempre en silencio absoluto para evitar que suene doble mientras carga el motor principal
-      a.muted = true;
-      a.src = streamUrl;
-      if (document.body) {
-        document.body.appendChild(a);
-      }
-      const p = a.play();
-      if (p && typeof p.then === "function") {
-        p.then(() => {
-          if (window.__blutuPrimedGestureAudio === a) {
-            a.muted = true;
-            a.pause();
-            a.currentTime = 0;
-          }
-        }).catch(() => {});
-      }
-      window.__blutuPrimedGestureAudio = a;
-    }
-  } catch (e) {}
-}
-
-try {
-  sessionStorage.removeItem("blutu_shared_music_muted");
-} catch (e) {}
-if (typeof window.__blutuSharedMusicMuted !== "boolean") {
-  window.__blutuSharedMusicMuted = false;
-}
-
-function isPreGameMusicMuted() {
-  if (typeof window.isSharedGameMusicMuted === "function") {
-    return Boolean(window.isSharedGameMusicMuted());
-  }
-  if (typeof window.__blutuSharedMusicMuted === "boolean") {
-    return window.__blutuSharedMusicMuted;
-  }
-  return false;
-}
-
-function applyPreGameMuteBtnVisual(btnEl, muted) {
-  if (!btnEl) return;
-  const label = muted ? "Activar música" : "Silenciar música";
-  const iconClass = muted ? "fa-volume-xmark" : "fa-volume-high";
-  btnEl.classList.toggle("is-muted", muted);
-  btnEl.setAttribute("aria-label", label);
-  btnEl.setAttribute("aria-pressed", muted ? "true" : "false");
-  btnEl.title = label;
-  btnEl.innerHTML = `<i class="fa-solid ${iconClass}" aria-hidden="true"></i>`;
-}
-
-function renderPreGameMuteControlHTML() {
-  const muted = isPreGameMusicMuted();
-  const label = muted ? "Activar música" : "Silenciar música";
-  const iconClass = muted ? "fa-volume-xmark" : "fa-volume-high";
-  return `
-    <div class="game-blog-pregame-audio-row">
-      <button type="button" id="preGameMuteBtn" class="game-pregame-mute-btn${muted ? " is-muted" : ""}" aria-label="${label}" aria-pressed="${muted ? "true" : "false"}" title="${label}" onclick="togglePreGameMusicMute()"><i class="fa-solid ${iconClass}" aria-hidden="true"></i></button>
-    </div>
-  `;
-}
-
-function togglePreGameMusicMute() {
-  if (typeof window.toggleSharedGameMute === "function") {
-    if (typeof window.registerSharedMuteButton === "function") {
-      window.registerSharedMuteButton("preGameMuteBtn");
-    }
-    const nextMuted = window.toggleSharedGameMute();
-    applyPreGameMuteBtnVisual(document.getElementById("preGameMuteBtn"), Boolean(nextMuted));
-    return nextMuted;
-  }
-  const nextMuted = !isPreGameMusicMuted();
-  window.__blutuSharedMusicMuted = nextMuted;
-  applyPreGameMuteBtnVisual(document.getElementById("preGameMuteBtn"), nextMuted);
-  ensureGamesEngineLoaded().then(() => {
-    if (typeof window.registerSharedMuteButton === "function") {
-      window.registerSharedMuteButton("preGameMuteBtn");
-    }
-  });
-  return nextMuted;
-}
-
 const logoBtnEl = document.getElementById("logoBtn");
 if (logoBtnEl) {
   logoBtnEl.addEventListener("pointerenter", preloadEasterEggModule, { passive: true, once: true });
@@ -436,7 +297,6 @@ if (logoBtnEl) {
       easterEggModuleRef.initBlutuDinoEasterEgg();
       return;
     }
-    primeSynchronousGestureAudio();
     preloadEasterEggModule().then((mod) => {
       if (mod && typeof mod.initBlutuDinoEasterEgg === "function") {
         mod.initBlutuDinoEasterEgg();
@@ -449,7 +309,6 @@ let gamesEngineModulePromise = null;
 let gamesEngineModuleRef = null;
 
 function ensureGamesEngineLoaded() {
-  warmUpEscalerasStreamUrlOnce();
   if (!gamesEngineModulePromise) {
     gamesEngineModulePromise = import("./games-engine.js").then((mod) => {
       gamesEngineModuleRef = mod;
@@ -482,7 +341,6 @@ function launchMiniGameFromBlog(gameType, mode) {
     gamesEngineModuleRef.launchMiniGameFromBlog(gameType, mode);
     return;
   }
-  primeSynchronousGestureAudio();
   ensureGamesEngineLoaded().then((mod) => {
     if (mod && typeof mod.launchMiniGameFromBlog === "function") {
       mod.launchMiniGameFromBlog(gameType, mode);
@@ -645,8 +503,15 @@ try {
     }
     window.syncBlogCroppedThumbCover = syncBlogCroppedThumbCover;
 
+    let blogThumbResizeRaf = null;
     window.addEventListener('resize', () => {
-      document.querySelectorAll('#blogSliderTrack img.blog-thumb-cropped').forEach(syncBlogCroppedThumbCover);
+      if (blogThumbResizeRaf !== null) return;
+      blogThumbResizeRaf = requestAnimationFrame(() => {
+        blogThumbResizeRaf = null;
+        const blogSec = document.getElementById('blogSection');
+        if (blogSec && blogSec.classList.contains('is-collapsed')) return;
+        document.querySelectorAll('#blogSliderTrack img.blog-thumb-cropped').forEach(syncBlogCroppedThumbCover);
+      });
     }, { passive: true });
 
     function buildBlogThumbFrameHTML(post, realIndex, editableMode) {
@@ -878,8 +743,9 @@ try {
       }, { passive: true });
 
       blogSliderWrapper.addEventListener('touchmove', (e) => {
+        if (!isBlogDragging) return;
         const track = getTrack();
-        if (!isBlogDragging || !track) return;
+        if (!track) return;
         blogTouchCurrentX = e.touches[0].clientX;
         const diffX = blogTouchCurrentX - blogTouchStartX;
         const wrapperWidth = blogSliderWrapper.clientWidth || 300;
@@ -889,10 +755,10 @@ try {
         track.style.transform = `translateX(${baseOffset + dragPercentage}%)`;
       }, { passive: true });
 
-      blogSliderWrapper.addEventListener('touchend', (e) => {
-        const track = getTrack();
+      blogSliderWrapper.addEventListener('touchend', () => {
         if (!isBlogDragging) return;
         isBlogDragging = false;
+        const track = getTrack();
         const diffX = blogTouchStartX - blogTouchCurrentX;
 
         if (track) {
@@ -907,36 +773,25 @@ try {
         }
       }, { passive: true });
 
-      // Arrastre con ratón en PC / Escritorio
-      blogSliderWrapper.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        if (e.target.closest('[contenteditable="true"]') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('select') || e.target.closest('textarea') || e.target.closest('.blog-thumb-admin-wrap')) return;
-        const track = getTrack();
-        isBlogPointerDown = true;
-        blogPointerStartX = e.clientX;
-        blogPointerCurrentX = blogPointerStartX;
-        if (track) {
-          track.style.transition = 'none';
-          track.style.cursor = 'grabbing';
-        }
-      });
-
-      window.addEventListener('mousemove', (e) => {
-        if (!isBlogPointerDown) return;
-        const track = getTrack();
-        if (!track) return;
+      // Arrastre con ratón en PC / Escritorio (solo escucha global mientras se arrastra)
+      let activeDragTrack = null;
+      const onBlogMouseMove = (e) => {
+        if (!isBlogPointerDown || !activeDragTrack) return;
         blogPointerCurrentX = e.clientX;
         const diffX = blogPointerCurrentX - blogPointerStartX;
         const wrapperWidth = blogSliderWrapper.clientWidth || 300;
         const baseOffset = -currentBlogPage * 100;
         const dragPercentage = (diffX / wrapperWidth) * 100;
-        track.style.transform = `translateX(${baseOffset + dragPercentage}%)`;
-      }, { passive: true });
-
-      window.addEventListener('mouseup', (e) => {
+        activeDragTrack.style.transform = `translateX(${baseOffset + dragPercentage}%)`;
+      };
+      const onBlogMouseUp = () => {
         if (!isBlogPointerDown) return;
         isBlogPointerDown = false;
-        const track = getTrack();
+        window.removeEventListener('mousemove', onBlogMouseMove);
+        window.removeEventListener('mouseup', onBlogMouseUp);
+        window.removeEventListener('blur', onBlogMouseUp);
+        const track = activeDragTrack || getTrack();
+        activeDragTrack = null;
         if (track) {
           track.style.cursor = '';
           track.style.transition = 'transform 0.25s cubic-bezier(0.25, 1, 0.5, 1)';
@@ -948,7 +803,24 @@ try {
         } else {
           updateBlogTrackPosition();
         }
-      }, { passive: true });
+      };
+
+      blogSliderWrapper.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('[contenteditable="true"]') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('select') || e.target.closest('textarea') || e.target.closest('.blog-thumb-admin-wrap')) return;
+        const track = getTrack();
+        isBlogPointerDown = true;
+        activeDragTrack = track;
+        blogPointerStartX = e.clientX;
+        blogPointerCurrentX = blogPointerStartX;
+        if (track) {
+          track.style.transition = 'none';
+          track.style.cursor = 'grabbing';
+        }
+        window.addEventListener('mousemove', onBlogMouseMove, { passive: true });
+        window.addEventListener('mouseup', onBlogMouseUp, { passive: true });
+        window.addEventListener('blur', onBlogMouseUp, { passive: true });
+      });
 
       // Desplazamiento horizontal con rueda / touchpad (con enfriamiento para evitar ráfagas en trackpads)
       let lastBlogWheelTime = 0;
@@ -1469,7 +1341,7 @@ try {
 
       function evaluateParagraphs() {
         rafId = null;
-        if (destroyed || !modalBody.isConnected || !modalBox.isConnected) return;
+        if (document.hidden || destroyed || !modalBody.isConnected || !modalBox.isConnected) return;
 
         const boxRect = modalBox.getBoundingClientRect();
         if (boxRect.height <= 0) return;
@@ -2727,7 +2599,6 @@ try {
         return `
           ${adminPanelHTML}
           <div class="game-blog-actions-stack" contenteditable="false">
-            ${renderPreGameMuteControlHTML()}
             <div class="game-blog-modes-row">
               <button type="button" id="memoramaSoloLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(soloHex)}" onclick="launchMiniGameFromBlog('memorama', 'solo')">Solo</button>
               <button type="button" id="memoramaVsPcLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(vsPcHex)}" onclick="toggleMemoramaVsPcDifficultyRow('blogVsPcDiffRow')">Vs PC</button>
@@ -2783,7 +2654,6 @@ try {
       return `
         ${adminSixHTML}
         <div class="game-blog-actions-stack" contenteditable="false">
-          ${renderPreGameMuteControlHTML()}
           <div class="game-blog-modes-row">
             <button type="button" id="sixEasyLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(easyHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'easy')">Fácil</button>
             <button type="button" id="sixHardLaunchBtn" class="game-custom-btn" style="${computeGameButtonStyleAttr(hardHex)}" onclick="launchMiniGameFromBlog('sixbysix', 'hard')">Difícil</button>
@@ -2879,18 +2749,6 @@ try {
           ${formattedContentHTML}
           ${renderGameBlogBottomControlsHTML(gameKey, false)}
         `;
-      }
-
-      if (gameKey === 'memorama' || gameKey === 'sixbysix') {
-        if (typeof window.registerSharedMuteButton === 'function') {
-          window.registerSharedMuteButton('preGameMuteBtn');
-        } else {
-          ensureGamesEngineLoaded().then(() => {
-            if (typeof window.registerSharedMuteButton === 'function') {
-              window.registerSharedMuteButton('preGameMuteBtn');
-            }
-          });
-        }
       }
 
       syncBlogParagraphFirstLetterColors(modalBody);
@@ -4338,17 +4196,6 @@ try {
         : '';
 
       if (isVideo && ytInfo) {
-        try {
-          if (typeof window.pauseBlutuGameMusicTemporary === 'function') {
-            window.pauseBlutuGameMusicTemporary();
-          }
-          if (window.player && typeof window.player.getPlayerState === 'function' && window.YT && window.YT.PlayerState) {
-            if (window.player.getPlayerState() === window.YT.PlayerState.PLAYING) {
-              window.player.pauseVideo();
-            }
-          }
-        } catch (e) {}
-
         if (modalImg) modalImg.style.display = 'none';
         if (videoWrapper) {
           videoWrapper.style.display = 'block';
@@ -8517,6 +8364,7 @@ try {
           container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--text-muted); font-style: italic; padding: 25px;">No hay productos en la categoría "${escapeHtmlAttr(currentMerchCategory)}".</p>`;
         }
       } else {
+        const merchSlideshowEntries = [];
         pageItems.forEach((item) => {
           const realIdx = merchItemsData.indexOf(item);
           const isAgotado = isItemAgotado(item);
@@ -8575,28 +8423,16 @@ try {
             container.appendChild(card);
 
             if (cleanImages.length > 1) {
-              let imgCurrentIdx = 0;
-              const intervalId = setInterval(() => {
-                if (document.hidden || isAdminMode) return;
-                const merchSecEl = document.getElementById('merchSection');
-                if (!merchSecEl || merchSecEl.classList.contains('is-collapsed') || merchSecEl.style.display === 'none') return;
-                const imgEl = document.getElementById(`merchCardImg_${realIdx}`);
-                if (!imgEl || !imgEl.isConnected) return;
-                imgCurrentIdx = (imgCurrentIdx + 1) % cleanImages.length;
-                const nextSrc = cleanImages[imgCurrentIdx];
-                const dotsEl = document.getElementById(`merchCardDots_${realIdx}`);
-                imgEl.style.opacity = '0.3';
-                setTimeout(() => {
-                  if (!imgEl.isConnected) return;
-                  imgEl.src = nextSrc;
-                  imgEl.style.opacity = '1';
-                }, 150);
-                if (dotsEl) {
-                  const dots = dotsEl.querySelectorAll('.merch-img-dot');
-                  dots.forEach((dot, dIdx) => dot.classList.toggle('active', dIdx === imgCurrentIdx));
-                }
-              }, 5000);
-              merchCardSlideshowIntervals.push(intervalId);
+              const imgEl = document.getElementById(`merchCardImg_${realIdx}`);
+              const dotsEl = document.getElementById(`merchCardDots_${realIdx}`);
+              if (imgEl) {
+                merchSlideshowEntries.push({
+                  cleanImages,
+                  imgEl,
+                  dots: dotsEl ? Array.from(dotsEl.querySelectorAll('.merch-img-dot')) : [],
+                  imgCurrentIdx: 0
+                });
+              }
             }
           } else {
             // MODO EDICIÓN INTEGRADO: misma tarjeta del usuario con edición directa en sus propios elementos
@@ -8670,6 +8506,30 @@ try {
             container.appendChild(card);
           }
         });
+
+        if (merchSlideshowEntries.length > 0) {
+          const merchSecEl = document.getElementById('merchSection');
+          const sharedIntervalId = setInterval(() => {
+            if (document.hidden || isAdminMode) return;
+            if (!merchSecEl || merchSecEl.classList.contains('is-collapsed') || merchSecEl.style.display === 'none') return;
+            for (let sIdx = 0; sIdx < merchSlideshowEntries.length; sIdx++) {
+              const entry = merchSlideshowEntries[sIdx];
+              if (!entry.imgEl.isConnected) continue;
+              entry.imgCurrentIdx = (entry.imgCurrentIdx + 1) % entry.cleanImages.length;
+              const nextSrc = entry.cleanImages[entry.imgCurrentIdx];
+              entry.imgEl.style.opacity = '0.3';
+              setTimeout(() => {
+                if (!entry.imgEl.isConnected) return;
+                entry.imgEl.src = nextSrc;
+                entry.imgEl.style.opacity = '1';
+              }, 150);
+              for (let dIdx = 0; dIdx < entry.dots.length; dIdx++) {
+                entry.dots[dIdx].classList.toggle('active', dIdx === entry.imgCurrentIdx);
+              }
+            }
+          }, 5000);
+          merchCardSlideshowIntervals.push(sharedIntervalId);
+        }
       }
 
       if (indicator) indicator.textContent = `${currentMerchPage + 1} / ${totalPages || 1}`;
@@ -10778,8 +10638,6 @@ try {
       const viteClientRe = new RegExp("<" + 'script[^>]*src="/@vite/client"[^>]*><' + "/script>\\s*", "gi");
       currentDocumentHTML = currentDocumentHTML.replace(viteClientRe, "");
       currentDocumentHTML = currentDocumentHTML.replace(/<script[^>]*src="https:\/\/www\.youtube\.com\/(iframe_api|s\/player\/[^"]*)"[^>]*><\/script>/gi, "");
-      currentDocumentHTML = currentDocumentHTML.replace(/<div id="yt-player-container"[^>]*>[\s\S]*?<\/div>/gi, "");
-      currentDocumentHTML = currentDocumentHTML.replace(/<audio id="blutu-direct-audio"[^>]*>[\s\S]*?<\/audio>/gi, "");
 
       downloadFile("index.html", currentDocumentHTML);
     }
@@ -11687,39 +11545,57 @@ try {
 
     // DESTELLO DE MURCIÉLAGOS TRAIL (ACTIVO EN ESCRITORIO Y CELULAR, DESACTIVADO EN LOS JUEGOS)
     (function initBatSparkles() {
-      let lastBatTime = 0;
+      let lastBatTime = -1000;
+      let lastTouchInputTime = -1000;
       let lastX = 0;
       let lastY = 0;
       let activeBatsCount = 0;
       const MAX_ACTIVE_BATS = 5;
-      const batPool = [];
       let pendingCoord = null;
       let rafScheduled = false;
 
+      let cachedBlogModal = document.getElementById('blogReadModal');
+      let cachedBlogModalBox = document.querySelector('#blogReadModal .blog-modal-box');
+      let cachedPixelModal = document.getElementById('pixelCanvasModal');
+      const bodyEl = document.body;
+
       function isAnyGameRunning() {
         if (window.__isMiniGameScreenOpen || window.activeMiniGame) return true;
-        if (document.body && document.body.classList.contains('blutu-egg-active')) return true;
-        const modalBox = document.querySelector('#blogReadModal .blog-modal-box');
-        if (modalBox && modalBox.classList.contains('is-minigame-active')) return true;
+        const body = bodyEl || document.body;
+        if (body && body.classList.contains('blutu-egg-active') && document.getElementById('blutuDinoStage')) return true;
+        if (!cachedBlogModal || !cachedBlogModal.isConnected) {
+          cachedBlogModal = document.getElementById('blogReadModal');
+        }
+        if (!cachedBlogModalBox || !cachedBlogModalBox.isConnected) {
+          cachedBlogModalBox = document.querySelector('#blogReadModal .blog-modal-box');
+        }
+        if (
+          cachedBlogModal &&
+          cachedBlogModal.style.display === 'flex' &&
+          cachedBlogModalBox &&
+          cachedBlogModalBox.classList.contains('is-minigame-active')
+        ) {
+          return true;
+        }
         return false;
       }
 
       window.clearActiveBatParticles = function clearActiveBatParticles() {
         pendingCoord = null;
         document.querySelectorAll('.bat-sparkle-particle').forEach((node) => {
+          if (node._batCleanupTimer) {
+            clearTimeout(node._batCleanupTimer);
+            node._batCleanupTimer = null;
+          }
+          if (node._batCleanupFn) {
+            node.removeEventListener('animationend', node._batCleanupFn);
+            node._batCleanupFn = null;
+          }
+          node._batCleaned = true;
           node.remove();
-          node.className = '';
-          if (batPool.length < MAX_ACTIVE_BATS) batPool.push(node);
         });
         activeBatsCount = 0;
       };
-
-      function acquireBatNode() {
-        if (batPool.length > 0) return batPool.pop();
-        const bat = document.createElement('div');
-        bat.textContent = '🦇';
-        return bat;
-      }
 
       function spawnBat(x, y, isTouch = false, isTapStart = false) {
         if (document.hidden || isAnyGameRunning()) return;
@@ -11735,13 +11611,17 @@ try {
           if (isTouch && dist < 26) return;
         }
 
+        const hostBody = bodyEl || document.body;
+        if (!hostBody) return;
+
         lastBatTime = now;
         lastX = x;
         lastY = y;
 
         activeBatsCount++;
-        const bat = acquireBatNode();
+        const bat = document.createElement('div');
         bat.className = 'bat-sparkle-particle';
+        bat.textContent = '🦇';
 
         const dx = (Math.random() - 0.5) * 68;
         const dy = isMobileScreen ? (26 + Math.random() * 28) : (24 + Math.random() * 28);
@@ -11755,20 +11635,25 @@ try {
         bat.style.setProperty('--dy', dy + 'px');
         bat.style.setProperty('--rot', rot + 'deg');
 
-        document.body.appendChild(bat);
+        hostBody.appendChild(bat);
 
-        let cleaned = false;
+        bat._batCleaned = false;
         const cleanup = () => {
-          if (cleaned) return;
-          cleaned = true;
+          if (bat._batCleaned) return;
+          bat._batCleaned = true;
+          if (bat._batCleanupTimer) {
+            clearTimeout(bat._batCleanupTimer);
+            bat._batCleanupTimer = null;
+          }
+          bat.removeEventListener('animationend', cleanup);
+          bat._batCleanupFn = null;
           if (bat.parentNode) bat.remove();
-          bat.className = '';
-          if (batPool.length < MAX_ACTIVE_BATS) batPool.push(bat);
           activeBatsCount = Math.max(0, activeBatsCount - 1);
         };
 
+        bat._batCleanupFn = cleanup;
         bat.addEventListener('animationend', cleanup, { once: true });
-        setTimeout(cleanup, 760);
+        bat._batCleanupTimer = setTimeout(cleanup, 760);
       }
 
       function processPointer() {
@@ -11781,13 +11666,14 @@ try {
       }
 
       function queuePointer(x, y, isTouch = false, isTapStart = false) {
-        if (document.hidden || isAnyGameRunning()) return;
-        if (activeBatsCount >= MAX_ACTIVE_BATS) return;
+        if (document.hidden || activeBatsCount >= MAX_ACTIVE_BATS || isAnyGameRunning()) return;
         const now = performance.now();
         const minInterval = isTouch ? 165 : 140;
         if (now - lastBatTime < minInterval) return;
-        const pixelModal = document.getElementById('pixelCanvasModal');
-        if (pixelModal && pixelModal.style.display === 'flex') return;
+        if (!cachedPixelModal || !cachedPixelModal.isConnected) {
+          cachedPixelModal = document.getElementById('pixelCanvasModal');
+        }
+        if (cachedPixelModal && cachedPixelModal.style.display === 'flex') return;
         pendingCoord = { x, y, isTouch, isTapStart: Boolean(isTapStart || (pendingCoord && pendingCoord.isTapStart)) };
         if (!rafScheduled) {
           rafScheduled = true;
@@ -11795,15 +11681,15 @@ try {
         }
       }
 
-      // Mouse en Escritorio (solo dispositivos con puntero real)
-      if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
-        window.addEventListener('mousemove', function(e) {
-          queuePointer(e.clientX, e.clientY, false, false);
-        }, { passive: true });
-      }
+      // Mouse en Escritorio y portátiles táctiles/híbridos (ignorando eventos sintéticos tras toque)
+      window.addEventListener('mousemove', function(e) {
+        if (performance.now() - lastTouchInputTime < 750) return;
+        queuePointer(e.clientX, e.clientY, false, false);
+      }, { passive: true });
 
       // Generación de partículas en Celular (toque y deslizamiento, desactivada en los juegos)
       window.addEventListener('touchstart', function(e) {
+        lastTouchInputTime = performance.now();
         if (e.touches && e.touches.length === 1) {
           const touch = e.touches[0];
           queuePointer(touch.clientX, touch.clientY, true, true);
@@ -11811,6 +11697,7 @@ try {
       }, { passive: true });
 
       window.addEventListener('touchmove', function(e) {
+        lastTouchInputTime = performance.now();
         if (e.touches && e.touches.length === 1) {
           const touch = e.touches[0];
           queuePointer(touch.clientX, touch.clientY, true, false);
@@ -11838,6 +11725,8 @@ try {
       element.style.setProperty('--anim-color', color);
       element.classList.add('music-btn-animating');
 
+      let cachedRect = element.getBoundingClientRect();
+      let cachedScrollY = window.scrollY;
       const startTime = Date.now();
       const interval = setInterval(() => {
         if (document.hidden || Date.now() - startTime >= durationMs - 50) {
@@ -11847,7 +11736,11 @@ try {
         }
         if (activeGreekCrossCount >= MAX_ACTIVE_GREEK_CROSSES) return;
 
-        const rect = element.getBoundingClientRect();
+        if (window.scrollY !== cachedScrollY) {
+          cachedScrollY = window.scrollY;
+          cachedRect = element.getBoundingClientRect();
+        }
+        const rect = cachedRect;
         if (!rect || rect.width === 0) return;
 
         for (let i = 0; i < 3; i++) {
@@ -11972,6 +11865,8 @@ try {
           const target = link.getAttribute('target');
           const startTime = Date.now();
           const duration = 2500; // 2.5 segundos
+          let cachedRect = link.getBoundingClientRect();
+          let cachedScrollY = window.scrollY;
 
           // Ráfagas continuas de cruces griegas (✚) y el logo de Blutu (blutu_logo.png)
           const interval = setInterval(() => {
@@ -11981,7 +11876,11 @@ try {
             }
             if (activeGreekCrossCount >= MAX_ACTIVE_GREEK_CROSSES) return;
 
-            const rect = link.getBoundingClientRect();
+            if (window.scrollY !== cachedScrollY) {
+              cachedScrollY = window.scrollY;
+              cachedRect = link.getBoundingClientRect();
+            }
+            const rect = cachedRect;
             if (!rect || rect.width === 0) return;
 
             // Emitir 3 partículas por ráfaga (combinando cruces griegas y el logo blutu_logo.png)
@@ -12507,8 +12406,6 @@ try {
 Object.assign(window, {
   reconcileAndMergePosts,
   preloadEasterEggModule,
-  primeSynchronousGestureAudio,
-  togglePreGameMusicMute,
   ensureGamesEngineLoaded,
   destroyActiveMiniGame,
   launchMiniGameFromBlog,

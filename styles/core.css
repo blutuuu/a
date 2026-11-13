@@ -110,11 +110,6 @@
       transition: opacity 0.22s ease;
     }
 
-    .blutu-dino-stage.is-closing #yt-player-container {
-      opacity: 0 !important;
-      visibility: hidden !important;
-    }
-
     .blutu-dino-canvas {
       position: relative;
       z-index: 2;
@@ -167,12 +162,6 @@
 
     .blutu-dino-btn:active {
       transform: scale(0.94);
-    }
-
-    .blutu-dino-btn.is-muted {
-      color: var(--text-muted);
-      border-color: rgba(90, 116, 191, 0.32);
-      opacity: 0.85;
     }
 
     .blutu-dino-score {

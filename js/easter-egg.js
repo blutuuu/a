@@ -1,25 +1,7 @@
-/* Blutu — Easter Egg Dino + Música Escaleras (100% Carga Bajo Demanda) */
-import {
-  preloadSharedGameMusicApi,
-  startSharedGameMusic,
-  notifySharedGameUserGesture,
-  isSharedGameMusicMuted,
-  pauseSharedGameMusicTemporary,
-  toggleSharedGameMute,
-  stopAndDestroySharedGameMusic
-} from "./game-audio.js";
-
-// Pre-cargar la API del reproductor cuando el usuario pasa el dedo o el cursor por el logo (sin iniciar audio ni red pesada)
-preloadSharedGameMusicApi();
-
+/* Blutu — Easter Egg Dino (100% Carga Bajo Demanda) */
     const getLogoBtn = () => document.getElementById('logoBtn');
     let logoBtn = getLogoBtn();
     let blutuEgg = null;
-
-    function ensureBlutuGameMusicPlaying() {
-      if (!blutuEgg || !blutuEgg.isOpen) return;
-      notifySharedGameUserGesture();
-    }
 
     export function initBlutuDinoEasterEgg() {
       logoBtn = getLogoBtn();
@@ -46,11 +28,9 @@ preloadSharedGameMusicApi();
       if (!blutuEgg) {
         blutuEgg = {
           isOpen: false,
-          isMuted: false,
           stageEl: null,
           canvas: null,
           ctx: null,
-          muteBtn: null,
           closeBtn: null,
           retryBtn: null,
           scoreEl: null,
@@ -100,6 +80,9 @@ preloadSharedGameMusicApi();
           milestoneElapsed: 0,
           milestoneDuration: 1.85,
           milestoneBats: [],
+          milestoneLabelSprite: null,
+          milestonePlacements: [],
+          exitFailsafeTimer: null,
           gameOverElapsed: 0,
           returnDuration: 0.86,
           returnStartX: 56,
@@ -123,6 +106,12 @@ preloadSharedGameMusicApi();
           sameTypeStreak: 0,
           lastObstacleType: '',
           lastBatArchetype: '',
+          batActive: false,
+          batCooldown: 0,
+          batWaitElapsed: 0,
+          batReturnSide: 'RIGHT',
+          batEntryY: 24,
+          singleBat: null,
           obstacles: [],
           dustPool: [],
           stars: [],
@@ -161,19 +150,6 @@ preloadSharedGameMusicApi();
       const controlsEl = document.createElement('div');
       controlsEl.className = 'blutu-dino-controls';
 
-      const currentlyMuted = isSharedGameMusicMuted();
-      blutuEgg.isMuted = currentlyMuted;
-      const muteBtn = document.createElement('button');
-      muteBtn.type = 'button';
-      muteBtn.id = 'blutuDinoMuteBtn';
-      muteBtn.className = 'blutu-dino-btn' + (currentlyMuted ? ' is-muted' : '');
-      muteBtn.setAttribute('aria-label', currentlyMuted ? 'Activar música' : 'Silenciar música');
-      muteBtn.setAttribute('aria-pressed', currentlyMuted ? 'true' : 'false');
-      muteBtn.title = currentlyMuted ? 'Activar música' : 'Silenciar música';
-      muteBtn.innerHTML = currentlyMuted
-        ? '<i class="fa-solid fa-volume-xmark"></i>'
-        : '<i class="fa-solid fa-volume-high"></i>';
-
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.id = 'blutuDinoCloseBtn';
@@ -182,7 +158,6 @@ preloadSharedGameMusicApi();
       closeBtn.title = 'Cerrar';
       closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
 
-      controlsEl.appendChild(muteBtn);
       controlsEl.appendChild(closeBtn);
 
       const scoreEl = document.createElement('div');
@@ -218,29 +193,16 @@ preloadSharedGameMusicApi();
       blutuEgg.stageEl = stageEl;
       blutuEgg.canvas = canvas;
       blutuEgg.ctx = canvas.getContext('2d', { alpha: true });
-      blutuEgg.muteBtn = muteBtn;
       blutuEgg.closeBtn = closeBtn;
       blutuEgg.retryBtn = retryBtn;
       blutuEgg.scoreEl = scoreEl;
       blutuEgg.gameOverEl = gameOverEl;
       blutuEgg.gameOverTitleEl = gameOverTitleEl;
 
-      // Iniciar y reproducir la canción del Easter Egg ("Escaleras" - 3Ea5h9Xqe3E) dentro del gesto sincrónico del usuario
-      startBlutuGameMusic();
-
       // Eventos de botones HUD (aislados del toque de salto)
       const stopJumpPropagation = (ev) => {
         ev.stopPropagation();
       };
-      muteBtn.addEventListener('pointerdown', stopJumpPropagation);
-      muteBtn.addEventListener('touchstart', stopJumpPropagation, { passive: true });
-      muteBtn.addEventListener('touchend', stopJumpPropagation, { passive: true });
-      muteBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        toggleBlutuGameMute();
-      });
-
       closeBtn.addEventListener('pointerdown', stopJumpPropagation);
       closeBtn.addEventListener('touchstart', stopJumpPropagation, { passive: true });
       closeBtn.addEventListener('touchend', stopJumpPropagation, { passive: true });
@@ -255,14 +217,9 @@ preloadSharedGameMusicApi();
         if (ev.cancelable) ev.preventDefault();
         triggerBlutuPlayerAction(true);
       });
-      retryBtn.addEventListener('touchend', (ev) => {
-        ev.stopPropagation();
-        ensureBlutuGameMusicPlaying();
-      }, { passive: true });
       retryBtn.addEventListener('click', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        ensureBlutuGameMusicPlaying();
         triggerBlutuPlayerAction(true);
       });
 
@@ -278,35 +235,24 @@ preloadSharedGameMusicApi();
       });
 
       const isHudControlTarget = (target) => {
-        return !!(target && (target.closest('#blutuDinoMuteBtn') || target.closest('#blutuDinoCloseBtn') || target.closest('#blutuDinoRetryBtn')));
+        return !!(target && (target.closest('#blutuDinoCloseBtn') || target.closest('#blutuDinoRetryBtn')));
       };
 
-      // Entrada táctil / click en el escenario para saltar al instante y desbloquear audio en touchend/pointerup/click (requerido por WKWebView / Instagram)
+      // Entrada táctil / click en el escenario para saltar al instante
       const handleStageAction = (ev) => {
         if (isHudControlTarget(ev.target)) return;
         if (ev.cancelable) ev.preventDefault();
-        ensureBlutuGameMusicPlaying();
         triggerBlutuPlayerAction(false);
-      };
-      const handleStageGestureUnlock = (ev) => {
-        if (isHudControlTarget(ev.target)) return;
-        ensureBlutuGameMusicPlaying();
       };
       if (window.PointerEvent) {
         stageEl.addEventListener('pointerdown', handleStageAction);
-        stageEl.addEventListener('pointerup', handleStageGestureUnlock);
         stageEl.addEventListener('touchstart', (ev) => {
           if (isHudControlTarget(ev.target)) return;
           if (ev.cancelable) ev.preventDefault();
         }, { passive: false });
-        stageEl.addEventListener('touchend', handleStageGestureUnlock, { passive: true });
-        stageEl.addEventListener('click', handleStageGestureUnlock);
       } else {
         stageEl.addEventListener('touchstart', handleStageAction, { passive: false });
-        stageEl.addEventListener('touchend', handleStageGestureUnlock, { passive: true });
         stageEl.addEventListener('mousedown', handleStageAction);
-        stageEl.addEventListener('mouseup', handleStageGestureUnlock);
-        stageEl.addEventListener('click', handleStageGestureUnlock);
       }
 
       // Dimensionar canvas y mapear posición original exacta del logo en el encabezado
@@ -349,7 +295,6 @@ preloadSharedGameMusicApi();
         if (ev.code === 'Space' || ev.code === 'ArrowUp' || ev.code === 'KeyW') {
           ev.preventDefault();
           if (!ev.repeat) {
-            ensureBlutuGameMusicPlaying();
             triggerBlutuPlayerAction(false);
           }
         } else if (ev.code === 'ArrowDown' || ev.code === 'KeyS') {
@@ -370,7 +315,11 @@ preloadSharedGameMusicApi();
       blutuEgg.visibilityHandler = () => {
         if (!blutuEgg || !blutuEgg.isOpen) return;
         if (document.hidden) {
-          stopBlutuLoop();
+          if (blutuEgg.state === 'EXIT_RETURN') {
+            destroyBlutuDinoEasterEgg();
+          } else {
+            stopBlutuLoop();
+          }
         } else if (
           blutuEgg.isInViewport &&
           (blutuEgg.state === 'INTRO_ROLL' ||
@@ -392,7 +341,11 @@ preloadSharedGameMusicApi();
           const entry = entries[0];
           blutuEgg.isInViewport = !!(entry && entry.isIntersecting);
           if (!blutuEgg.isInViewport) {
-            stopBlutuLoop();
+            if (blutuEgg.state === 'EXIT_RETURN') {
+              destroyBlutuDinoEasterEgg();
+            } else {
+              stopBlutuLoop();
+            }
           } else if (
             !document.hidden &&
             (blutuEgg.state === 'INTRO_ROLL' ||
@@ -409,20 +362,6 @@ preloadSharedGameMusicApi();
       // Arrancar con la animación de caída rodando hacia la izquierda
       resetBlutuRunState(true);
       startBlutuLoop();
-    }
-
-    function startBlutuGameMusic() {
-      if (!blutuEgg) return;
-      startSharedGameMusic(blutuEgg.stageEl || document.body, 'blutuDinoMuteBtn');
-    }
-
-    function toggleBlutuGameMute() {
-      if (!blutuEgg) return;
-      blutuEgg.isMuted = toggleSharedGameMute();
-    }
-
-    export function pauseBlutuGameMusicTemporary() {
-      pauseSharedGameMusicTemporary();
     }
 
     function stopBlutuLoop() {
@@ -442,6 +381,10 @@ preloadSharedGameMusicApi();
     export function destroyBlutuDinoEasterEgg() {
       if (!blutuEgg) return;
       stopBlutuLoop();
+      if (blutuEgg.exitFailsafeTimer !== null) {
+        clearTimeout(blutuEgg.exitFailsafeTimer);
+        blutuEgg.exitFailsafeTimer = null;
+      }
       blutuEgg.isOpen = false;
       blutuEgg.state = 'IDLE';
 
@@ -466,24 +409,41 @@ preloadSharedGameMusicApi();
         blutuEgg.intersectionObserver = null;
       }
 
-      stopAndDestroySharedGameMusic(false);
-
+      if (blutuEgg.canvas) {
+        blutuEgg.canvas.width = 0;
+        blutuEgg.canvas.height = 0;
+      }
       if (blutuEgg.stageEl) {
         blutuEgg.stageEl.remove();
         blutuEgg.stageEl = null;
       }
       blutuEgg.canvas = null;
       blutuEgg.ctx = null;
-      blutuEgg.muteBtn = null;
       blutuEgg.closeBtn = null;
       blutuEgg.retryBtn = null;
       blutuEgg.scoreEl = null;
       blutuEgg.gameOverEl = null;
       blutuEgg.gameOverTitleEl = null;
+      blutuEgg.obstacles.length = 0;
       blutuEgg.roadCoins.length = 0;
       blutuEgg.bouncingCoins.length = 0;
       blutuEgg.milestoneBats.length = 0;
+      if (blutuEgg.milestoneLabelSprite) {
+        blutuEgg.milestoneLabelSprite.canvas.width = 0;
+        blutuEgg.milestoneLabelSprite.canvas.height = 0;
+        blutuEgg.milestoneLabelSprite = null;
+      }
+      for (let i = 0; i < blutuEgg.dustPool.length; i++) {
+        blutuEgg.dustPool[i].active = false;
+      }
       blutuEgg.hasActiveBouncingCoins = false;
+      blutuEgg.milestoneActive = false;
+      blutuEgg.batActive = false;
+      blutuEgg.batCooldown = 0;
+      blutuEgg.batWaitElapsed = 0;
+      blutuEgg.batReturnSide = 'RIGHT';
+      blutuEgg.batEntryY = 24;
+      blutuEgg.singleBat = null;
       document.body.classList.remove('blutu-egg-active');
 
       if (logoBtn) {
@@ -573,6 +533,20 @@ preloadSharedGameMusicApi();
       blutuEgg.exitElapsed = 0;
       blutuEgg.exitDuration = wasAtCenter ? 0.34 : 0.62;
       blutuEgg.state = 'EXIT_RETURN';
+
+      if (blutuEgg.exitFailsafeTimer !== null) {
+        clearTimeout(blutuEgg.exitFailsafeTimer);
+      }
+      blutuEgg.exitFailsafeTimer = setTimeout(() => {
+        if (blutuEgg && blutuEgg.isOpen && blutuEgg.state === 'EXIT_RETURN') {
+          destroyBlutuDinoEasterEgg();
+        }
+      }, Math.round(blutuEgg.exitDuration * 1000) + 160);
+
+      if (document.hidden || !blutuEgg.isInViewport) {
+        destroyBlutuDinoEasterEgg();
+        return;
+      }
 
       if (blutuEgg.stageEl) {
         blutuEgg.stageEl.classList.add('is-closing');
@@ -675,6 +649,12 @@ preloadSharedGameMusicApi();
       blutuEgg.sameTypeStreak = 0;
       blutuEgg.lastObstacleType = '';
       blutuEgg.lastBatArchetype = '';
+      blutuEgg.batActive = false;
+      blutuEgg.batCooldown = 0;
+      blutuEgg.batWaitElapsed = 0;
+      blutuEgg.batReturnSide = 'RIGHT';
+      blutuEgg.batEntryY = 24;
+      blutuEgg.singleBat = null;
       blutuEgg.speed = blutuEgg.width < 520 ? 228 : 258;
       blutuEgg.spawnTimer = 0.55;
 
@@ -790,18 +770,22 @@ preloadSharedGameMusicApi();
       blutuEgg.obstacleCount++;
       const tier = blutuEgg.difficultyTier || 0;
 
-      // Garantizar ver lápidas abajo y murciélagos arriba desde los primeros segundos y subir intensidad por nivel
+      // Garantizar ver lápidas abajo y el regreso del único murciélago cuando le toca entrar desde la derecha
+      const canReturnRightBat = !blutuEgg.batActive && blutuEgg.batReturnSide === 'RIGHT' && blutuEgg.batCooldown <= 0;
       let type = 'TOMBSTONE';
       if (blutuEgg.obstacleCount === 1) {
         type = 'TOMBSTONE';
-      } else if (blutuEgg.obstacleCount === 2) {
+      } else if (blutuEgg.obstacleCount === 2 && canReturnRightBat) {
         type = 'BAT';
-      } else {
-        const batChance = Math.min(0.56, 0.40 + tier * 0.025);
-        type = Math.random() < batChance ? 'BAT' : 'TOMBSTONE';
-        if (type === blutuEgg.lastObstacleType && blutuEgg.sameTypeStreak >= 2) {
-          type = (type === 'TOMBSTONE') ? 'BAT' : 'TOMBSTONE';
+      } else if (canReturnRightBat) {
+        const batChance = Math.min(0.62, 0.44 + tier * 0.03);
+        if (blutuEgg.batWaitElapsed >= 1.35 || (blutuEgg.lastObstacleType === 'TOMBSTONE' && blutuEgg.sameTypeStreak >= 2)) {
+          type = 'BAT';
+        } else {
+          type = Math.random() < batChance ? 'BAT' : 'TOMBSTONE';
         }
+      } else {
+        type = 'TOMBSTONE';
       }
 
       if (type === blutuEgg.lastObstacleType) {
@@ -856,126 +840,7 @@ preloadSharedGameMusicApi();
           phase: Math.random() * Math.PI * 2
         });
       } else {
-        // Murciélagos vivos: en TODAS las dificultades se mueven de un lado al otro e incluso pueden retroceder y volver a lanzarse
-        const batScale = 0.90 + Math.random() * 0.20;
-        const w = Math.round((isCompact ? 38 : 42) * batScale);
-        const h = Math.round((isCompact ? 20 : 22) * batScale);
-        const safeUpperMaxY = Math.max(16, blutuEgg.groundY - blutuEgg.playerSize - h - (isCompact ? 8 : 10));
-        const lowSkimY = blutuEgg.groundY - h - (isCompact ? (4 + Math.random() * 5) : (5 + Math.random() * 7));
-
-        let batArchetype = 'DIVE_LOW';
-        if (blutuEgg.obstacleCount === 2) {
-          batArchetype = 'DIVE_LOW';
-        } else {
-          const candidates = [
-            { id: 'DIVE_LOW', weight: 0.34 },
-            { id: 'LOW_PROWL', weight: 0.24 },
-            { id: 'CLIMB_MID', weight: 0.22 },
-            { id: 'HIGH_WAVE', weight: 0.20 }
-          ].filter((c) => c.id !== blutuEgg.lastBatArchetype);
-          let totalW = 0;
-          for (let cIdx = 0; cIdx < candidates.length; cIdx++) totalW += candidates[cIdx].weight;
-          let roll = Math.random() * totalW;
-          batArchetype = candidates[candidates.length - 1].id;
-          for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
-            roll -= candidates[cIdx].weight;
-            if (roll <= 0) {
-              batArchetype = candidates[cIdx].id;
-              break;
-            }
-          }
-        }
-        blutuEgg.lastBatArchetype = batArchetype;
-
-        const canHitGrounded = (batArchetype === 'DIVE_LOW' || batArchetype === 'LOW_PROWL');
-        let entryY = 20;
-        let baseY = 24;
-        if (batArchetype === 'DIVE_LOW') {
-          entryY = 12 + Math.random() * Math.max(8, (safeUpperMaxY - 12) * 0.42);
-          baseY = lowSkimY;
-        } else if (batArchetype === 'LOW_PROWL') {
-          entryY = lowSkimY - (8 + Math.random() * 14);
-          baseY = lowSkimY;
-        } else if (batArchetype === 'CLIMB_MID') {
-          entryY = Math.min(blutuEgg.groundY - h - 14, safeUpperMaxY + (isCompact ? 16 : 22));
-          baseY = Math.max(15, safeUpperMaxY - (1 + Math.random() * 9));
-        } else {
-          const highBand = 11 + Math.random() * Math.max(6, (safeUpperMaxY - 14) * 0.45);
-          entryY = highBand;
-          baseY = highBand;
-        }
-
-        const vertSpanPx = isCompact ? 114 : 168;
-        const minSafeVertEndX = blutuEgg.playerRestX + (isCompact ? 120 : 174);
-        const vertJitter = (Math.random() - 0.5) * (isCompact ? 22 : 38);
-        const vertStartX = Math.max(
-          minSafeVertEndX + vertSpanPx,
-          Math.min(blutuEgg.width - 18, blutuEgg.width * (isCompact ? 0.85 : 0.80) + vertJitter)
-        );
-        const vertEndX = Math.max(minSafeVertEndX, vertStartX - vertSpanPx);
-
-        const descendsFromSky = (tier >= 4 || blutuEgg.distance >= 800) && (Math.random() < Math.min(0.85, 0.45 + tier * 0.08));
-        const skySpanPx = isCompact ? 118 : 176;
-        const minSafeSkyEndX = blutuEgg.playerRestX + (isCompact ? 136 : 196);
-        const skyJitter = (Math.random() - 0.5) * (isCompact ? 24 : 42);
-        const skyStartX = Math.max(
-          minSafeSkyEndX + skySpanPx,
-          Math.min(blutuEgg.width - 22, blutuEgg.width * (isCompact ? 0.86 : 0.81) + skyJitter)
-        );
-        const skyEndX = Math.max(minSafeSkyEndX, skyStartX - skySpanPx);
-
-        // En TODAS las dificultades (desde 0 pts) los murciélagos zigzaguean lateralmente y pueden hacer maniobra de regreso ("turnBack")
-        const tierAgility = Math.min(6, tier);
-        const baseWeaveAmp = (isCompact ? 12.5 : 17.5) + tierAgility * (isCompact ? 2.1 : 3.0);
-        const turnBackProb = Math.min(0.78, 0.46 + tier * 0.06);
-        const canTurnBack = (blutuEgg.obstacleCount === 2) ? true : (Math.random() < turnBackProb);
-        const turnTriggerX = blutuEgg.playerRestX + (isCompact ? (125 + Math.random() * 55) : (175 + Math.random() * 85));
-        const retreatDur = Math.max(0.26, 0.36 - Math.min(0.08, tier * 0.01));
-        const returnChargeDur = Math.max(0.24, 0.34 - Math.min(0.07, tier * 0.01));
-
-        blutuEgg.obstacles.push({
-          type: 'BAT',
-          variant: 0,
-          batArchetype: batArchetype,
-          canHitGrounded: canHitGrounded,
-          x: spawnX,
-          anchorX: spawnX,
-          prevScreenX: spawnX,
-          facingRight: false,
-          y: descendsFromSky ? (-h - 14) : entryY,
-          entryY: entryY,
-          baseY: baseY,
-          vertStartX: vertStartX,
-          vertEndX: vertEndX,
-          w: w,
-          h: h,
-          descendsFromSky: descendsFromSky,
-          skyStartX: skyStartX,
-          skyEndX: skyEndX,
-          skyEmerge: descendsFromSky ? 0 : 1,
-          lateralMover: true,
-          canTurnBack: canTurnBack,
-          turnState: 0, // 0: acercándose, 1: retrocediendo hacia la derecha, 2: volviendo al ataque hacia la izquierda
-          turnElapsed: 0,
-          turnTriggerX: turnTriggerX,
-          retreatDur: retreatDur,
-          returnChargeDur: returnChargeDur,
-          phase: Math.random() * Math.PI * 2,
-          flapPhase: Math.random() * 8,
-          flapSpeed: (14.6 + Math.random() * 3.8 + tierAgility * 0.45) * (1.06 - (batScale - 0.90) * 0.45),
-          swoopFreq: (3.8 + Math.random() * 1.8) + tierAgility * 0.18,
-          swoopScale: batArchetype === 'HIGH_WAVE' ? 1.45 : (canHitGrounded ? 0.72 : 1.05),
-          weaveFreq: (3.1 + Math.random() * 1.15) + tierAgility * 0.22,
-          weaveAmp: baseWeaveAmp,
-          glideCycle: 0.92 + Math.random() * 0.44,
-          glideDip: 0,
-          isGliding: false,
-          flightClock: Math.random() * 0.6,
-          tilt: 0,
-          blinkOffset: Math.random() * 2.8,
-          chirped: false,
-          chirpAge: -1
-        });
+        launchBlutuSingleBat('RIGHT');
       }
 
       // Cada 200 puntos (cada tier) los obstáculos salen con mayor cadencia y presión, manteniendo siempre ventana justa de salto
@@ -1162,6 +1027,10 @@ preloadSharedGameMusicApi();
           blutuEgg.milestoneActive = false;
           blutuEgg.milestoneBats.length = 0;
           blutuEgg.roadCoins.length = 0;
+          blutuEgg.batActive = false;
+          blutuEgg.batCooldown = 0;
+          blutuEgg.batWaitElapsed = 0;
+          blutuEgg.batReturnSide = 'RIGHT';
           blutuEgg.returnStartX = blutuEgg.playerX;
           blutuEgg.returnStartY = blutuEgg.playerY;
           blutuEgg.returnStartAngle = blutuEgg.playerAngle || 0;
@@ -1207,33 +1076,161 @@ preloadSharedGameMusicApi();
       blutuEgg.rafId = null;
     }
 
-    function spawnBlutuMilestoneBats() {
+    function launchBlutuSingleBat(entrySide) {
       if (!blutuEgg) return;
-      blutuEgg.milestoneBats.length = 0;
+      const tier = blutuEgg.difficultyTier || 0;
       const isCompact = blutuEgg.width < 520;
-      // 12 murciélagos vivaces emergiendo en oleadas orgánicas desde detrás de la moneda hacia izquierda, arriba y derecha
-      const angles = [-2.02, -1.12, -2.38, -0.76, -2.72, -0.42, -3.02, -0.12, 2.86, 0.26, -1.62, -1.52];
-      for (let i = 0; i < angles.length; i++) {
-        const ang = angles[i] + (Math.random() - 0.5) * 0.12;
-        const speed = (isCompact ? 116 : 156) + (i % 4) * 22 + Math.random() * 16;
-        const waveDelay = (i < 6) ? (i * 0.026) : (0.16 + (i - 6) * 0.036);
-        const curveSign = Math.cos(ang) >= 0 ? -1 : 1;
-        blutuEgg.milestoneBats.push({
-          dx: Math.cos(ang) * 5,
-          dy: Math.sin(ang) * 5,
-          vx: Math.cos(ang) * speed,
-          vy: Math.sin(ang) * speed,
-          angle: ang,
-          curve: curveSign * (0.42 + (i % 3) * 0.16),
-          scale: 0.72 + (i % 4) * 0.10,
-          phase: Math.random() * Math.PI * 2,
-          flapPhase: Math.random() * 8,
-          flapSpeed: 16.5 + (i % 3) * 2.1 + Math.random() * 1.5,
-          blinkOffset: Math.random() * 2.2,
-          delay: waveDelay,
-          age: 0
-        });
+      const w = isCompact ? 38 : 42;
+      const h = isCompact ? 20 : 22;
+      const safeUpperMaxY = Math.max(16, blutuEgg.groundY - blutuEgg.playerSize - h - (isCompact ? 8 : 10));
+      const lowSkimY = blutuEgg.groundY - h - (isCompact ? (4 + Math.random() * 5) : (5 + Math.random() * 7));
+      const tierAgility = Math.min(6, tier);
+      const baseWeaveAmp = (isCompact ? 12.5 : 17.5) + tierAgility * (isCompact ? 2.1 : 3.0);
+
+      const batObj = blutuEgg.singleBat || {
+        type: 'BAT',
+        variant: 0,
+        phase: Math.random() * Math.PI * 2,
+        flapPhase: Math.random() * 8,
+        blinkOffset: Math.random() * 2.8,
+        flightClock: Math.random() * 0.6
+      };
+      batObj.type = 'BAT';
+      batObj.variant = 0;
+      batObj.w = w;
+      batObj.h = h;
+      batObj.lateralMover = true;
+      batObj.flapSpeed = 15.2 + Math.random() * 2.8 + tierAgility * 0.45;
+      batObj.swoopFreq = (3.8 + Math.random() * 1.8) + tierAgility * 0.18;
+      batObj.weaveFreq = (3.1 + Math.random() * 1.15) + tierAgility * 0.22;
+      batObj.weaveAmp = baseWeaveAmp;
+      batObj.glideCycle = 0.92 + Math.random() * 0.44;
+      batObj.glideDip = 0;
+      batObj.isGliding = false;
+      batObj.tilt = 0;
+      batObj.chirped = false;
+      batObj.chirpAge = -1;
+      batObj.turnState = 0;
+      batObj.turnElapsed = 0;
+
+      if (entrySide === 'LEFT') {
+        const startX = -w - 28;
+        const entryOverheadY = Math.max(11, Math.min(safeUpperMaxY - 2, 13 + Math.random() * 9));
+        const sweepLowY = Math.max(entryOverheadY + 8, blutuEgg.groundY - h - (isCompact ? 22 : 28));
+        batObj.moveDir = 1;
+        batObj.batArchetype = 'LEFT_STALK';
+        batObj.canHitGrounded = false;
+        batObj.x = startX;
+        batObj.anchorX = startX;
+        batObj.prevScreenX = startX;
+        batObj.facingRight = true;
+        batObj.entryY = entryOverheadY;
+        batObj.baseY = sweepLowY;
+        batObj.y = entryOverheadY;
+        batObj.vertStartX = blutuEgg.playerRestX + (isCompact ? 76 : 96);
+        batObj.vertEndX = Math.min(blutuEgg.width - 42, batObj.vertStartX + (isCompact ? 115 : 175));
+        batObj.descendsFromSky = false;
+        batObj.skyEmerge = 1;
+        batObj.canTurnBack = false;
+        batObj.swoopScale = 1.15;
+        blutuEgg.batEntryY = entryOverheadY + h * 0.5;
+      } else {
+        const spawnX = blutuEgg.width + 36;
+        let batArchetype = 'DIVE_LOW';
+        if (blutuEgg.obstacleCount <= 2) {
+          batArchetype = 'DIVE_LOW';
+        } else {
+          const candidates = [
+            { id: 'DIVE_LOW', weight: 0.34 },
+            { id: 'LOW_PROWL', weight: 0.24 },
+            { id: 'CLIMB_MID', weight: 0.22 },
+            { id: 'HIGH_WAVE', weight: 0.20 }
+          ].filter((c) => c.id !== blutuEgg.lastBatArchetype);
+          let totalW = 0;
+          for (let cIdx = 0; cIdx < candidates.length; cIdx++) totalW += candidates[cIdx].weight;
+          let roll = Math.random() * totalW;
+          batArchetype = candidates[candidates.length - 1].id;
+          for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
+            roll -= candidates[cIdx].weight;
+            if (roll <= 0) {
+              batArchetype = candidates[cIdx].id;
+              break;
+            }
+          }
+        }
+        blutuEgg.lastBatArchetype = batArchetype;
+
+        const canHitGrounded = (batArchetype === 'DIVE_LOW' || batArchetype === 'LOW_PROWL');
+        let entryY = 20;
+        let baseY = 24;
+        if (batArchetype === 'DIVE_LOW') {
+          entryY = 12 + Math.random() * Math.max(8, (safeUpperMaxY - 12) * 0.42);
+          baseY = lowSkimY;
+        } else if (batArchetype === 'LOW_PROWL') {
+          entryY = lowSkimY - (8 + Math.random() * 14);
+          baseY = lowSkimY;
+        } else if (batArchetype === 'CLIMB_MID') {
+          entryY = Math.min(blutuEgg.groundY - h - 14, safeUpperMaxY + (isCompact ? 16 : 22));
+          baseY = Math.max(15, safeUpperMaxY - (1 + Math.random() * 9));
+        } else {
+          const highBand = 11 + Math.random() * Math.max(6, (safeUpperMaxY - 14) * 0.45);
+          entryY = highBand;
+          baseY = highBand;
+        }
+
+        const vertSpanPx = isCompact ? 114 : 168;
+        const minSafeVertEndX = blutuEgg.playerRestX + (isCompact ? 120 : 174);
+        const vertJitter = (Math.random() - 0.5) * (isCompact ? 22 : 38);
+        const vertStartX = Math.max(
+          minSafeVertEndX + vertSpanPx,
+          Math.min(blutuEgg.width - 18, blutuEgg.width * (isCompact ? 0.85 : 0.80) + vertJitter)
+        );
+        const vertEndX = Math.max(minSafeVertEndX, vertStartX - vertSpanPx);
+
+        const descendsFromSky = (tier >= 4 || blutuEgg.distance >= 800) && (Math.random() < Math.min(0.85, 0.45 + tier * 0.08));
+        const skySpanPx = isCompact ? 118 : 176;
+        const minSafeSkyEndX = blutuEgg.playerRestX + (isCompact ? 136 : 196);
+        const skyJitter = (Math.random() - 0.5) * (isCompact ? 24 : 42);
+        const skyStartX = Math.max(
+          minSafeSkyEndX + skySpanPx,
+          Math.min(blutuEgg.width - 22, blutuEgg.width * (isCompact ? 0.86 : 0.81) + skyJitter)
+        );
+        const skyEndX = Math.max(minSafeSkyEndX, skyStartX - skySpanPx);
+
+        const turnBackProb = Math.min(0.78, 0.46 + tier * 0.06);
+        const canTurnBack = (blutuEgg.obstacleCount === 2) ? true : (Math.random() < turnBackProb);
+        const turnTriggerX = blutuEgg.playerRestX + (isCompact ? (125 + Math.random() * 55) : (175 + Math.random() * 85));
+        const retreatDur = Math.max(0.26, 0.36 - Math.min(0.08, tier * 0.01));
+        const returnChargeDur = Math.max(0.24, 0.34 - Math.min(0.07, tier * 0.01));
+
+        batObj.moveDir = -1;
+        batObj.batArchetype = batArchetype;
+        batObj.canHitGrounded = canHitGrounded;
+        batObj.x = spawnX;
+        batObj.anchorX = spawnX;
+        batObj.prevScreenX = spawnX;
+        batObj.facingRight = false;
+        batObj.y = descendsFromSky ? (-h - 14) : entryY;
+        batObj.entryY = entryY;
+        batObj.baseY = baseY;
+        batObj.vertStartX = vertStartX;
+        batObj.vertEndX = vertEndX;
+        batObj.descendsFromSky = descendsFromSky;
+        batObj.skyStartX = skyStartX;
+        batObj.skyEndX = skyEndX;
+        batObj.skyEmerge = descendsFromSky ? 0 : 1;
+        batObj.canTurnBack = canTurnBack;
+        batObj.turnTriggerX = turnTriggerX;
+        batObj.retreatDur = retreatDur;
+        batObj.returnChargeDur = returnChargeDur;
+        batObj.swoopScale = batArchetype === 'HIGH_WAVE' ? 1.45 : (canHitGrounded ? 0.72 : 1.05);
+        blutuEgg.batEntryY = entryY + h * 0.5;
       }
+
+      blutuEgg.singleBat = batObj;
+      blutuEgg.batActive = true;
+      blutuEgg.batWaitElapsed = 0;
+      blutuEgg.obstacles.push(batObj);
     }
 
     function upgradeFarObstaclesForTier(tier) {
@@ -1251,7 +1248,7 @@ preloadSharedGameMusicApi();
           obs.riseEndX = Math.max(minSafeRiseEndX, obs.riseStartX - riseSpanPx);
           obs.emerge = 0;
           obs.y = blutuEgg.groundY;
-        } else if (obs.type === 'BAT') {
+        } else if (obs.type === 'BAT' && obs.moveDir !== 1) {
           const bAnchor = obs.anchorX !== undefined ? obs.anchorX : obs.x;
           obs.lateralMover = true;
           obs.weaveAmp = Math.max(obs.weaveAmp || 14, (isCompact ? 12.5 : 17.5) + Math.min(6, tier) * (isCompact ? 2.1 : 3.0));
@@ -1300,27 +1297,59 @@ preloadSharedGameMusicApi();
       blutuEgg.spawnTimer = Math.max(blutuEgg.spawnTimer, isCompact ? 0.72 : 0.66);
     }
 
+    function buildBlutuMilestoneLabelSprite(labelText, isThousand, isCompact) {
+      const labelFontPx = isThousand ? (isCompact ? 15 : 17) : (isCompact ? 14 : 16);
+      const scale = Math.min(window.devicePixelRatio || 1, 2);
+      const c = document.createElement('canvas');
+      const mctx = c.getContext('2d');
+      mctx.font = '700 ' + labelFontPx + "px 'Cinzel', Georgia, serif";
+      const textWidth = Math.ceil(mctx.measureText(labelText).width);
+      const pad = 18;
+      const cssW = Math.max(60, textWidth + pad * 2);
+      const cssH = Math.ceil(labelFontPx + pad * 2);
+
+      c.width = Math.ceil(cssW * scale);
+      c.height = Math.ceil(cssH * scale);
+      mctx.setTransform(scale, 0, 0, scale, 0, 0);
+      mctx.font = '700 ' + labelFontPx + "px 'Cinzel', Georgia, serif";
+      mctx.textAlign = 'center';
+      mctx.textBaseline = 'middle';
+      mctx.shadowColor = isThousand ? 'rgba(140, 162, 230, 0.95)' : 'rgba(90, 116, 191, 0.9)';
+      mctx.shadowBlur = isThousand ? 12 : 9;
+      mctx.strokeStyle = 'rgba(90, 116, 191, 0.88)';
+      mctx.lineWidth = 2.4;
+      mctx.lineJoin = 'round';
+      mctx.strokeText(labelText, cssW * 0.5, cssH * 0.5);
+      mctx.fillStyle = '#eef3ff';
+      mctx.fillText(labelText, cssW * 0.5, cssH * 0.5);
+
+      return { canvas: c, cssW: cssW, cssH: cssH };
+    }
+
     function triggerBlutuMilestoneCelebration(coin) {
       if (!blutuEgg || !coin) return;
       blutuEgg.coinsCollected = (blutuEgg.coinsCollected || 0) + 1;
       const tier = coin.tier || blutuEgg.coinsCollected;
       const isThousand = (tier > 0 && tier % 5 === 0);
+      const labelStr = isThousand ? ('200x' + tier) : '+200';
+      const isCompact = blutuEgg.width < 520;
 
       blutuEgg.milestoneActive = true;
       blutuEgg.milestoneIsThousand = isThousand;
-      blutuEgg.milestoneCoinCount = isThousand ? Math.max(5, tier) : 1;
-      blutuEgg.milestoneLabel = isThousand ? ('200x' + tier) : '+200';
+      blutuEgg.milestoneCoinCount = isThousand ? Math.min(15, Math.max(5, tier)) : 1;
+      blutuEgg.milestoneLabel = labelStr;
       blutuEgg.milestoneOriginX = coin.x;
       blutuEgg.milestoneOriginY = coin.y;
       blutuEgg.milestoneElapsed = 0;
 
-      spawnBlutuDustBurst(coin.x, coin.y + coin.r * 0.4, 5);
-
-      if (isThousand) {
-        spawnBlutuMilestoneBats();
-      } else {
-        blutuEgg.milestoneBats.length = 0;
+      if (blutuEgg.milestoneLabelSprite) {
+        blutuEgg.milestoneLabelSprite.canvas.width = 0;
+        blutuEgg.milestoneLabelSprite.canvas.height = 0;
       }
+      blutuEgg.milestoneLabelSprite = buildBlutuMilestoneLabelSprite(labelStr, isThousand, isCompact);
+
+      spawnBlutuDustBurst(coin.x, coin.y + coin.r * 0.4, 5);
+      blutuEgg.milestoneBats.length = 0;
 
       if (blutuEgg.scoreEl) {
         blutuEgg.scoreEl.classList.add('is-milestone');
@@ -1331,31 +1360,15 @@ preloadSharedGameMusicApi();
       if (!blutuEgg || !blutuEgg.milestoneActive) return;
       blutuEgg.milestoneElapsed += dt;
 
-      if (blutuEgg.milestoneIsThousand && blutuEgg.milestoneBats.length > 0) {
-        for (let i = 0; i < blutuEgg.milestoneBats.length; i++) {
-          const mb = blutuEgg.milestoneBats[i];
-          if (mb.delay > 0) {
-            mb.delay = Math.max(0, mb.delay - dt);
-            continue;
-          }
-          mb.age += dt;
-          mb.flapPhase += mb.flapSpeed * dt;
-          const cosC = Math.cos(mb.curve * dt);
-          const sinC = Math.sin(mb.curve * dt);
-          const nvx = mb.vx * cosC - mb.vy * sinC;
-          const nvy = mb.vx * sinC + mb.vy * cosC - 22 * dt;
-          mb.vx = nvx;
-          mb.vy = nvy;
-          const flapLift = -Math.sin((mb.flapPhase / 8) * Math.PI * 2) * 26;
-          mb.dx += mb.vx * dt + Math.cos(mb.age * 9 + mb.phase) * 10 * dt;
-          mb.dy += (mb.vy + flapLift) * dt + Math.sin(mb.age * 13 + mb.phase) * 16 * dt;
-        }
-      }
-
       if (blutuEgg.milestoneElapsed >= blutuEgg.milestoneDuration) {
         blutuEgg.milestoneActive = false;
         blutuEgg.milestoneIsThousand = false;
         blutuEgg.milestoneBats.length = 0;
+        if (blutuEgg.milestoneLabelSprite) {
+          blutuEgg.milestoneLabelSprite.canvas.width = 0;
+          blutuEgg.milestoneLabelSprite.canvas.height = 0;
+          blutuEgg.milestoneLabelSprite = null;
+        }
         blutuEgg.milestoneElapsed = 0;
         if (blutuEgg.scoreEl) {
           blutuEgg.scoreEl.classList.remove('is-milestone');
@@ -1461,6 +1474,30 @@ preloadSharedGameMusicApi();
         updateBlutuMilestoneCelebration(dt);
       }
 
+      if (!blutuEgg.batActive) {
+        if (blutuEgg.batCooldown > 0) {
+          blutuEgg.batCooldown = Math.max(0, blutuEgg.batCooldown - dt);
+        } else if (blutuEgg.obstacleCount >= 2) {
+          blutuEgg.batWaitElapsed += dt;
+        }
+
+        // Si salió por el lado izquierdo, regresa por ese mismo lado izquierdo cuando no haya una lápida obligando a saltar frente al jugador
+        if (blutuEgg.batReturnSide === 'LEFT' && blutuEgg.batCooldown <= 0) {
+          const groundRestCheckY = blutuEgg.groundY - blutuEgg.playerSize * 0.5;
+          let tombstoneBlockingJump = false;
+          for (let oIdx = 0; oIdx < blutuEgg.obstacles.length; oIdx++) {
+            const o = blutuEgg.obstacles[oIdx];
+            if (o.type === 'TOMBSTONE' && o.x + o.w > blutuEgg.playerRestX - 24 && o.x < blutuEgg.playerRestX + (isCompact ? 132 : 172)) {
+              tombstoneBlockingJump = true;
+              break;
+            }
+          }
+          if (!tombstoneBlockingJump && blutuEgg.playerY >= groundRestCheckY - 18) {
+            launchBlutuSingleBat('LEFT');
+          }
+        }
+      }
+
       // Física vertical del jugador (Blutu logo) escalada proporcionalmente al nivel para saltos ágiles
       const groundRestY = blutuEgg.groundY - blutuEgg.playerSize * 0.5;
       const jumpScale = getBlutuJumpScale();
@@ -1534,14 +1571,18 @@ preloadSharedGameMusicApi();
         }
       }
 
-      // Spawner de lápidas y murciélagos garantizando espacio suficiente respecto a obstáculos y monedas en el camino
+      // Spawner de lápidas y del único murciélago garantizando espacio suficiente respecto a obstáculos y monedas en el camino
       blutuEgg.spawnTimer -= dt;
       if (blutuEgg.spawnTimer <= 0) {
-        const lastObs = blutuEgg.obstacles[blutuEgg.obstacles.length - 1];
         const jumpAirTime = (2 * (isCompact ? 525 : 555)) / (1620 * jumpScale);
         const tier5FairMargin = (blutuEgg.difficultyTier >= 5 || blutuEgg.distance >= 1000) ? (isCompact ? 34 : 48) : 0;
         const minPixelGap = blutuEgg.speed * (jumpAirTime * 0.98) + (isCompact ? 56 : 72) + tier5FairMargin;
-        const lastBaseX = lastObs ? ((lastObs.anchorX !== undefined ? lastObs.anchorX : lastObs.x) + lastObs.w) : 0;
+        let lastBaseX = 0;
+        for (let oIdx = 0; oIdx < blutuEgg.obstacles.length; oIdx++) {
+          const o = blutuEgg.obstacles[oIdx];
+          const ox = (o.anchorX !== undefined ? o.anchorX : o.x) + o.w;
+          if (ox > lastBaseX) lastBaseX = ox;
+        }
         let lastCoinRight = 0;
         for (let cIdx = 0; cIdx < blutuEgg.roadCoins.length; cIdx++) {
           const cr = blutuEgg.roadCoins[cIdx].x + blutuEgg.roadCoins[cIdx].r + (isCompact ? 52 : 68);
@@ -1570,160 +1611,220 @@ preloadSharedGameMusicApi();
         if (obs.type === 'BAT') {
           if (obs.anchorX === undefined) obs.anchorX = obs.x;
           const prevScreenX = (obs.prevScreenX !== undefined) ? obs.prevScreenX : obs.x;
+          const isReturningFromLeft = (obs.moveDir === 1);
 
-          // Movimiento horizontal vivo en TODAS las dificultades: se mueven de un lado al otro, pueden retroceder hacia la derecha y volver a lanzarse
-          let anchorSpeedMul = 1.0;
-          if (obs.canTurnBack) {
-            if (obs.turnState === 0 && obs.anchorX <= (obs.turnTriggerX || (blutuEgg.playerRestX + 165))) {
-              // Verificar que no choque con un obstáculo justo detrás al retroceder brevemente
-              let safeToRetreat = true;
-              for (let j = 0; j < blutuEgg.obstacles.length; j++) {
-                if (j === i) continue;
-                const other = blutuEgg.obstacles[j];
-                const otherX = other.anchorX !== undefined ? other.anchorX : other.x;
-                if (otherX > obs.anchorX && (otherX - obs.anchorX) < (isCompact ? 120 : 155)) {
-                  safeToRetreat = false;
-                  break;
-                }
-              }
-              obs.turnState = safeToRetreat ? 1 : 2;
-              obs.turnElapsed = 0;
+          if (isReturningFromLeft) {
+            // Regresando por la izquierda hacia la derecha: sobrevuela al jugador y recorre el escenario atormentándolo antes de salir por la derecha
+            const returnSpeed = blutuEgg.speed * (1.10 + Math.min(0.22, blutuEgg.difficultyTier * 0.03));
+            obs.anchorX += returnSpeed * dt;
+            obs.facingRight = true;
+
+            const vSpan = Math.max(45, (obs.vertEndX || 200) - (obs.vertStartX || 120));
+            const rawV = Math.max(0, Math.min(1, (obs.anchorX - (obs.vertStartX || 120)) / vSpan));
+            const vertProg = rawV * rawV * (3 - 2 * rawV);
+
+            const distAhead = obs.anchorX - blutuEgg.playerX;
+            if (!obs.chirped && obs.anchorX > 8) {
+              obs.chirped = true;
+              obs.chirpAge = 0;
             }
-            if (obs.turnState === 1) {
-              obs.turnElapsed = (obs.turnElapsed || 0) + dt;
-              const rDur = obs.retreatDur || 0.34;
-              const uRet = Math.min(1, obs.turnElapsed / rDur);
-              // Se devuelve visiblemente hacia la derecha y frena antes de lanzarse de regreso
-              anchorSpeedMul = -0.62 * Math.sin(uRet * Math.PI);
-              if (uRet >= 1) {
-                obs.turnState = 2;
+            if (obs.chirpAge >= 0) {
+              obs.chirpAge += dt;
+              if (obs.chirpAge > 0.46) obs.chirpAge = -1;
+            }
+
+            const wFreq = obs.weaveFreq || 3.2;
+            const baseWeaveAmp = obs.weaveAmp || (isCompact ? 13 : 18);
+            const nearT = Math.max(0, Math.min(1, (distAhead - 28) / 86));
+            const effectiveWeaveAmp = baseWeaveAmp * (0.45 + 0.55 * nearT);
+            const weavePhase = blutuEgg.runTime * wFreq + obs.phase;
+            const weaveX = Math.sin(weavePhase) * effectiveWeaveAmp;
+            const weaveVx = Math.cos(weavePhase) * wFreq * effectiveWeaveAmp;
+            obs.x = obs.anchorX + weaveX;
+            obs.prevScreenX = obs.x;
+
+            obs.flightClock = (obs.flightClock || 0) + dt;
+            const gCycle = obs.glideCycle || 1.1;
+            const cyclePos = (obs.flightClock + obs.phase * 0.15) % gCycle;
+            const isGliding = (vertProg > 0.08 && vertProg < 0.65) || (cyclePos > gCycle - 0.21);
+            obs.isGliding = isGliding;
+
+            if (isGliding) {
+              obs.glideDip = Math.min(2.6, (obs.glideDip || 0) + dt * 13);
+            } else {
+              obs.glideDip = Math.max(0, (obs.glideDip || 0) - dt * 18);
+              obs.flapPhase = (obs.flapPhase || 0) + dt * ((obs.flapSpeed || 15) + Math.min(3.2, blutuEgg.difficultyTier * 0.45)) * 1.12;
+            }
+
+            const prevY = obs.y;
+            const swoopFreq = (obs.swoopFreq || 4.4) + Math.min(1.8, blutuEgg.difficultyTier * 0.26);
+            const primaryWave = Math.sin(blutuEgg.runTime * swoopFreq + obs.phase) * (batSwoopAmp * (obs.swoopScale || 1.1));
+            const secondaryFlutter = Math.cos(blutuEgg.runTime * (swoopFreq * 1.82) + obs.phase * 1.6) * 1.3;
+            const flapRad = ((obs.flapPhase || 0) / 8) * Math.PI * 2;
+            const wingbeatLift = isGliding ? 0 : (-Math.sin(flapRad) * 1.8);
+
+            const activeBaseY = obs.entryY + (obs.baseY - obs.entryY) * vertProg;
+            const safePassMaxY = Math.max(14, blutuEgg.groundY - blutuEgg.playerSize - obs.h - (isCompact ? 6 : 8));
+            const maxAllowedY = (obs.anchorX < blutuEgg.playerRestX + (isCompact ? 80 : 102))
+              ? safePassMaxY
+              : (blutuEgg.groundY - obs.h - (isCompact ? 18 : 22));
+            obs.y = Math.max(8, Math.min(maxAllowedY, activeBaseY + primaryWave + secondaryFlutter + wingbeatLift + (obs.glideDip || 0)));
+
+            const vy = (obs.y - prevY) / Math.max(0.008, dt);
+            const targetTilt = Math.max(-0.28, Math.min(0.24, -vy * 0.0022 + weaveVx * 0.0018 + (isGliding ? -0.075 : Math.cos(flapRad) * 0.055)));
+            obs.tilt = (obs.tilt || 0) + (targetTilt - (obs.tilt || 0)) * Math.min(1, dt * 14);
+          } else {
+            // Movimiento horizontal vivo de derecha a izquierda con finta opcional ("turnBack")
+            let anchorSpeedMul = 1.0;
+            if (obs.canTurnBack) {
+              if (obs.turnState === 0 && obs.anchorX <= (obs.turnTriggerX || (blutuEgg.playerRestX + 165))) {
+                let safeToRetreat = true;
+                for (let j = 0; j < blutuEgg.obstacles.length; j++) {
+                  if (j === i) continue;
+                  const other = blutuEgg.obstacles[j];
+                  const otherX = other.anchorX !== undefined ? other.anchorX : other.x;
+                  if (otherX > obs.anchorX && (otherX - obs.anchorX) < (isCompact ? 120 : 155)) {
+                    safeToRetreat = false;
+                    break;
+                  }
+                }
+                obs.turnState = safeToRetreat ? 1 : 2;
                 obs.turnElapsed = 0;
               }
-            } else if (obs.turnState === 2) {
-              obs.turnElapsed = (obs.turnElapsed || 0) + dt;
-              const cDur = obs.returnChargeDur || 0.32;
-              const uChg = Math.min(1, obs.turnElapsed / cDur);
-              // Vuelve a embestir hacia la izquierda tras darse la vuelta
-              anchorSpeedMul = 1.0 + (0.48 + Math.min(0.28, blutuEgg.difficultyTier * 0.045)) * Math.sin(uChg * Math.PI);
-              if (uChg >= 1) {
-                obs.turnState = 3;
+              if (obs.turnState === 1) {
+                obs.turnElapsed = (obs.turnElapsed || 0) + dt;
+                const rDur = obs.retreatDur || 0.34;
+                const uRet = Math.min(1, obs.turnElapsed / rDur);
+                anchorSpeedMul = -0.62 * Math.sin(uRet * Math.PI);
+                if (uRet >= 1) {
+                  obs.turnState = 2;
+                  obs.turnElapsed = 0;
+                }
+              } else if (obs.turnState === 2) {
+                obs.turnElapsed = (obs.turnElapsed || 0) + dt;
+                const cDur = obs.returnChargeDur || 0.32;
+                const uChg = Math.min(1, obs.turnElapsed / cDur);
+                anchorSpeedMul = 1.0 + (0.48 + Math.min(0.28, blutuEgg.difficultyTier * 0.045)) * Math.sin(uChg * Math.PI);
+                if (uChg >= 1) {
+                  obs.turnState = 3;
+                }
               }
             }
-          }
 
-          obs.anchorX -= (blutuEgg.speed * anchorSpeedMul) * dt;
+            obs.anchorX -= (blutuEgg.speed * anchorSpeedMul) * dt;
 
-          // Descenso desde el cielo nocturno en niveles altos
-          let skyEmerge = 1;
-          if (obs.descendsFromSky) {
-            const prevSkyEmerge = (obs.skyEmerge !== undefined) ? obs.skyEmerge : 0;
-            const skySpan = Math.max(50, obs.skyStartX - obs.skyEndX);
-            const rawSkyT = Math.max(0, Math.min(1, (obs.skyStartX - obs.anchorX) / skySpan));
-            skyEmerge = 1 - Math.pow(1 - rawSkyT, 2.15);
-            obs.skyEmerge = skyEmerge;
-            if (prevSkyEmerge <= 0.08 && skyEmerge > 0.08) {
-              spawnBlutuWingMote(obs.anchorX + obs.w * 0.5, 5);
-              spawnBlutuWingMote(obs.anchorX + obs.w * 0.35, 7);
+            // Descenso desde el cielo nocturno en niveles altos
+            let skyEmerge = 1;
+            if (obs.descendsFromSky) {
+              const prevSkyEmerge = (obs.skyEmerge !== undefined) ? obs.skyEmerge : 0;
+              const skySpan = Math.max(50, obs.skyStartX - obs.skyEndX);
+              const rawSkyT = Math.max(0, Math.min(1, (obs.skyStartX - obs.anchorX) / skySpan));
+              skyEmerge = 1 - Math.pow(1 - rawSkyT, 2.15);
+              obs.skyEmerge = skyEmerge;
+              if (prevSkyEmerge <= 0.08 && skyEmerge > 0.08) {
+                spawnBlutuWingMote(obs.anchorX + obs.w * 0.5, 5);
+                spawnBlutuWingMote(obs.anchorX + obs.w * 0.35, 7);
+              }
+            } else {
+              obs.skyEmerge = 1;
             }
-          } else {
-            obs.skyEmerge = 1;
-          }
 
-          // Progreso de maniobra vertical (bajar en picada a ras del suelo o subir a media altura)
-          let vertProg = 1;
-          if (!obs.descendsFromSky && obs.vertStartX !== undefined && obs.vertEndX !== undefined) {
-            const vSpan = Math.max(45, obs.vertStartX - obs.vertEndX);
-            const rawV = Math.max(0, Math.min(1, (obs.vertStartX - obs.anchorX) / vSpan));
-            vertProg = rawV * rawV * (3 - 2 * rawV);
-          }
-
-          // Ecolocalización al iniciar picada, darse la vuelta o aproximarse al jugador
-          const alertDist = isCompact ? 205 : 275;
-          const distToPlayer = obs.anchorX - blutuEgg.playerX;
-          const diveTrigger = (obs.batArchetype === 'DIVE_LOW' && vertProg > 0.16 && vertProg < 0.85) || obs.turnState === 2;
-          if (!obs.chirped && skyEmerge > 0.55 && ((distToPlayer > 22 && distToPlayer < alertDist) || diveTrigger)) {
-            obs.chirped = true;
-            obs.chirpAge = 0;
-          }
-          if (obs.chirpAge >= 0) {
-            obs.chirpAge += dt;
-            if (obs.chirpAge > 0.46) obs.chirpAge = -1;
-          }
-
-          // Vaivén horizontal de lado a lado en todas las dificultades, suavizado justo sobre el jugador para mantener saltos limpios
-          const wFreq = obs.weaveFreq || 3.2;
-          const baseWeaveAmp = obs.weaveAmp || (isCompact ? 13 : 18);
-          let swayEnvelope = 1;
-          if (obs.lateralMover) {
-            const nearFloor = obs.canHitGrounded ? 0.36 : 0.65;
-            const nearT = Math.max(0, Math.min(1, (distToPlayer - 34) / 96));
-            swayEnvelope = (nearFloor + (1 - nearFloor) * nearT) * Math.min(1, 0.40 + skyEmerge * 0.80);
-          }
-          const effectiveWeaveAmp = baseWeaveAmp * swayEnvelope;
-          const weavePhase = blutuEgg.runTime * wFreq + obs.phase;
-          const weaveX = Math.sin(weavePhase) * effectiveWeaveAmp;
-          const weaveVx = Math.cos(weavePhase) * wFreq * effectiveWeaveAmp;
-          obs.x = obs.anchorX + weaveX;
-
-          const screenDx = obs.x - prevScreenX;
-          obs.prevScreenX = obs.x;
-          obs.facingRight = (obs.turnState === 1) || (screenDx > 0.35);
-
-          // Ritmo vivo de ráfagas de aleteo alternadas con planeos en picada
-          obs.flightClock = (obs.flightClock || 0) + dt;
-          const gCycle = obs.glideCycle || 1.1;
-          const cyclePos = (obs.flightClock + obs.phase * 0.15) % gCycle;
-          const isAlert = (obs.chirpAge >= 0) || (!isPlayerGrounded && distToPlayer > -18 && distToPlayer < 190);
-          const isActivelyDiving = (obs.batArchetype === 'DIVE_LOW' && !obs.descendsFromSky && vertProg > 0.08 && vertProg < 0.72) ||
-            (obs.descendsFromSky && skyEmerge > 0.05 && skyEmerge < 0.45);
-          const isGliding = isActivelyDiving || (!isAlert && (cyclePos > gCycle - 0.21));
-          obs.isGliding = isGliding;
-
-          if (isGliding) {
-            obs.glideDip = Math.min(2.6, (obs.glideDip || 0) + dt * 13);
-          } else {
-            obs.glideDip = Math.max(0, (obs.glideDip || 0) - dt * 18);
-            const prevFrame = Math.floor(obs.flapPhase || 0) % 8;
-            const hoverBoost = (obs.lateralMover && weaveVx > 8) ? 1.14 : 1.0;
-            const alertCadence = (isAlert ? 1.16 : 1.0) * hoverBoost;
-            obs.flapPhase = (obs.flapPhase || 0) + dt * ((obs.flapSpeed || 15) + Math.min(3.2, blutuEgg.difficultyTier * 0.45)) * alertCadence;
-            const nextFrame = Math.floor(obs.flapPhase) % 8;
-            if (skyEmerge > 0.25 && prevFrame !== 3 && nextFrame === 3 && Math.random() < 0.34) {
-              spawnBlutuWingMote(obs.x + obs.w * 0.58, obs.y + obs.h * 0.46);
+            // Progreso de maniobra vertical (bajar en picada a ras del suelo o subir a media altura)
+            let vertProg = 1;
+            if (!obs.descendsFromSky && obs.vertStartX !== undefined && obs.vertEndX !== undefined) {
+              const vSpan = Math.max(45, obs.vertStartX - obs.vertEndX);
+              const rawV = Math.max(0, Math.min(1, (obs.vertStartX - obs.anchorX) / vSpan));
+              vertProg = rawV * rawV * (3 - 2 * rawV);
             }
+
+            // Ecolocalización al iniciar picada, darse la vuelta o aproximarse al jugador
+            const alertDist = isCompact ? 205 : 275;
+            const distToPlayer = obs.anchorX - blutuEgg.playerX;
+            const diveTrigger = (obs.batArchetype === 'DIVE_LOW' && vertProg > 0.16 && vertProg < 0.85) || obs.turnState === 2;
+            if (!obs.chirped && skyEmerge > 0.55 && ((distToPlayer > 22 && distToPlayer < alertDist) || diveTrigger)) {
+              obs.chirped = true;
+              obs.chirpAge = 0;
+            }
+            if (obs.chirpAge >= 0) {
+              obs.chirpAge += dt;
+              if (obs.chirpAge > 0.46) obs.chirpAge = -1;
+            }
+
+            // Vaivén horizontal de lado a lado en todas las dificultades, suavizado justo sobre el jugador para mantener saltos limpios
+            const wFreq = obs.weaveFreq || 3.2;
+            const baseWeaveAmp = obs.weaveAmp || (isCompact ? 13 : 18);
+            let swayEnvelope = 1;
+            if (obs.lateralMover) {
+              const nearFloor = obs.canHitGrounded ? 0.36 : 0.65;
+              const nearT = Math.max(0, Math.min(1, (distToPlayer - 34) / 96));
+              swayEnvelope = (nearFloor + (1 - nearFloor) * nearT) * Math.min(1, 0.40 + skyEmerge * 0.80);
+            }
+            const effectiveWeaveAmp = baseWeaveAmp * swayEnvelope;
+            const weavePhase = blutuEgg.runTime * wFreq + obs.phase;
+            const weaveX = Math.sin(weavePhase) * effectiveWeaveAmp;
+            const weaveVx = Math.cos(weavePhase) * wFreq * effectiveWeaveAmp;
+            obs.x = obs.anchorX + weaveX;
+
+            const screenDx = obs.x - prevScreenX;
+            obs.prevScreenX = obs.x;
+            obs.facingRight = (obs.turnState === 1) || (screenDx > 0.35);
+
+            // Ritmo vivo de ráfagas de aleteo alternadas con planeos en picada
+            obs.flightClock = (obs.flightClock || 0) + dt;
+            const gCycle = obs.glideCycle || 1.1;
+            const cyclePos = (obs.flightClock + obs.phase * 0.15) % gCycle;
+            const isAlert = (obs.chirpAge >= 0) || (!isPlayerGrounded && distToPlayer > -18 && distToPlayer < 190);
+            const isActivelyDiving = (obs.batArchetype === 'DIVE_LOW' && !obs.descendsFromSky && vertProg > 0.08 && vertProg < 0.72) ||
+              (obs.descendsFromSky && skyEmerge > 0.05 && skyEmerge < 0.45);
+            const isGliding = isActivelyDiving || (!isAlert && (cyclePos > gCycle - 0.21));
+            obs.isGliding = isGliding;
+
+            if (isGliding) {
+              obs.glideDip = Math.min(2.6, (obs.glideDip || 0) + dt * 13);
+            } else {
+              obs.glideDip = Math.max(0, (obs.glideDip || 0) - dt * 18);
+              const prevFrame = Math.floor(obs.flapPhase || 0) % 8;
+              const hoverBoost = (obs.lateralMover && weaveVx > 8) ? 1.14 : 1.0;
+              const alertCadence = (isAlert ? 1.16 : 1.0) * hoverBoost;
+              obs.flapPhase = (obs.flapPhase || 0) + dt * ((obs.flapSpeed || 15) + Math.min(3.2, blutuEgg.difficultyTier * 0.45)) * alertCadence;
+              const nextFrame = Math.floor(obs.flapPhase) % 8;
+              if (skyEmerge > 0.25 && prevFrame !== 3 && nextFrame === 3 && Math.random() < 0.34) {
+                spawnBlutuWingMote(obs.x + obs.w * 0.58, obs.y + obs.h * 0.46);
+              }
+            }
+
+            const prevY = obs.y;
+            const swoopFreq = (obs.swoopFreq || 4.4) + Math.min(1.8, blutuEgg.difficultyTier * 0.26);
+            const ampScale = obs.swoopScale || 1.0;
+            const primaryWave = Math.sin(blutuEgg.runTime * swoopFreq + obs.phase) * (batSwoopAmp * ampScale);
+            const secondaryFlutter = Math.cos(blutuEgg.runTime * (swoopFreq * 1.82) + obs.phase * 1.6) * 1.3;
+            const flapRad = ((obs.flapPhase || 0) / 8) * Math.PI * 2;
+            const wingbeatLift = isGliding ? 0 : (-Math.sin(flapRad) * 1.8);
+
+            const startLaneY = (obs.entryY !== undefined) ? obs.entryY : obs.baseY;
+            const activeBaseY = obs.descendsFromSky
+              ? obs.baseY
+              : (startLaneY + (obs.baseY - startLaneY) * vertProg);
+
+            // Límite inferior según si el murciélago baja a ras del suelo (obliga a saltar) o patrulla por arriba
+            const maxAllowedY = obs.canHitGrounded
+              ? (blutuEgg.groundY - obs.h - 3)
+              : Math.max(14, blutuEgg.groundY - blutuEgg.playerSize - obs.h - (isCompact ? 8 : 10));
+            const cruiseY = Math.max(8, Math.min(maxAllowedY, activeBaseY + primaryWave + secondaryFlutter + wingbeatLift + (obs.glideDip || 0)));
+
+            if (obs.descendsFromSky && skyEmerge < 0.999) {
+              const skyHiddenY = -obs.h - 14;
+              obs.y = Math.min(maxAllowedY, skyHiddenY + (cruiseY - skyHiddenY) * skyEmerge);
+            } else {
+              obs.y = cruiseY;
+            }
+
+            // Cabeceo / inclinación orgánica combinando picada descendente y vaivén lateral
+            const vy = (obs.y - prevY) / Math.max(0.008, dt);
+            const lateralBank = obs.lateralMover ? (weaveVx * 0.0018) : 0;
+            const targetTilt = Math.max(-0.28, Math.min(0.24, -vy * 0.0022 + lateralBank + (isGliding ? -0.075 : Math.cos(flapRad) * 0.055)));
+            obs.tilt = (obs.tilt || 0) + (targetTilt - (obs.tilt || 0)) * Math.min(1, dt * 14);
           }
-
-          const prevY = obs.y;
-          const swoopFreq = (obs.swoopFreq || 4.4) + Math.min(1.8, blutuEgg.difficultyTier * 0.26);
-          const ampScale = obs.swoopScale || 1.0;
-          const primaryWave = Math.sin(blutuEgg.runTime * swoopFreq + obs.phase) * (batSwoopAmp * ampScale);
-          const secondaryFlutter = Math.cos(blutuEgg.runTime * (swoopFreq * 1.82) + obs.phase * 1.6) * 1.3;
-          const flapRad = ((obs.flapPhase || 0) / 8) * Math.PI * 2;
-          const wingbeatLift = isGliding ? 0 : (-Math.sin(flapRad) * 1.8);
-
-          const startLaneY = (obs.entryY !== undefined) ? obs.entryY : obs.baseY;
-          const activeBaseY = obs.descendsFromSky
-            ? obs.baseY
-            : (startLaneY + (obs.baseY - startLaneY) * vertProg);
-
-          // Límite inferior según si el murciélago baja a ras del suelo (obliga a saltar) o patrulla por arriba
-          const maxAllowedY = obs.canHitGrounded
-            ? (blutuEgg.groundY - obs.h - 3)
-            : Math.max(14, blutuEgg.groundY - blutuEgg.playerSize - obs.h - (isCompact ? 8 : 10));
-          const cruiseY = Math.max(8, Math.min(maxAllowedY, activeBaseY + primaryWave + secondaryFlutter + wingbeatLift + (obs.glideDip || 0)));
-
-          if (obs.descendsFromSky && skyEmerge < 0.999) {
-            const skyHiddenY = -obs.h - 14;
-            obs.y = Math.min(maxAllowedY, skyHiddenY + (cruiseY - skyHiddenY) * skyEmerge);
-          } else {
-            obs.y = cruiseY;
-          }
-
-          // Cabeceo / inclinación orgánica combinando picada descendente y vaivén lateral
-          const vy = (obs.y - prevY) / Math.max(0.008, dt);
-          const lateralBank = obs.lateralMover ? (weaveVx * 0.0018) : 0;
-          const targetTilt = Math.max(-0.28, Math.min(0.24, -vy * 0.0022 + lateralBank + (isGliding ? -0.075 : Math.cos(flapRad) * 0.055)));
-          obs.tilt = (obs.tilt || 0) + (targetTilt - (obs.tilt || 0)) * Math.min(1, dt * 14);
         } else {
           obs.x -= blutuEgg.speed * dt;
           obs.baseY = blutuEgg.groundY - obs.h;
@@ -1743,7 +1844,25 @@ preloadSharedGameMusicApi();
           }
         }
 
-        if ((obs.anchorX !== undefined ? obs.anchorX : obs.x) + obs.w < -68) {
+        if (obs.type === 'BAT') {
+          if (obs.moveDir === 1) {
+            if ((obs.anchorX > blutuEgg.width + 44) && (obs.x > blutuEgg.width + 44)) {
+              blutuEgg.obstacles.splice(i, 1);
+              blutuEgg.batActive = false;
+              blutuEgg.batReturnSide = 'RIGHT';
+              blutuEgg.batCooldown = Math.max(0.45, 0.85 - Math.min(0.38, blutuEgg.difficultyTier * 0.04));
+              blutuEgg.batWaitElapsed = 0;
+              continue;
+            }
+          } else if ((obs.anchorX + obs.w < -44) && (obs.x + obs.w < -44)) {
+            blutuEgg.obstacles.splice(i, 1);
+            blutuEgg.batActive = false;
+            blutuEgg.batReturnSide = 'LEFT';
+            blutuEgg.batCooldown = Math.max(0.48, 0.88 - Math.min(0.36, blutuEgg.difficultyTier * 0.04));
+            blutuEgg.batWaitElapsed = 0;
+            continue;
+          }
+        } else if (obs.x + obs.w < -68) {
           blutuEgg.obstacles.splice(i, 1);
           continue;
         }
@@ -1850,12 +1969,14 @@ preloadSharedGameMusicApi();
         }
         ctx.stroke();
 
-        // Partículas de polvo azul
+        // Partículas de polvo azul (reutiliza color base y modula globalAlpha sin concatenar strings rgba por fotograma)
+        ctx.fillStyle = '#8ca2e6';
         for (let i = 0; i < blutuEgg.dustPool.length; i++) {
           const p = blutuEgg.dustPool[i];
           if (!p.active) continue;
-          const alpha = Math.max(0, p.life / p.maxLife) * 0.55;
-          ctx.fillStyle = 'rgba(140, 162, 230, ' + alpha.toFixed(2) + ')';
+          const pAlpha = Math.max(0, p.life / p.maxLife) * 0.55 * exitFade;
+          if (pAlpha <= 0.01) continue;
+          ctx.globalAlpha = pAlpha;
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
           ctx.fill();
@@ -1875,7 +1996,6 @@ preloadSharedGameMusicApi();
 
       if (obsAlpha > 0.01 && blutuEgg.obstacles.length > 0) {
         ctx.save();
-        if (obsAlpha < 0.999) ctx.globalAlpha = obsAlpha;
         for (let i = 0; i < blutuEgg.obstacles.length; i++) {
           const obs = blutuEgg.obstacles[i];
           if (obs.type === 'TOMBSTONE') {
@@ -1884,19 +2004,17 @@ preloadSharedGameMusicApi();
             const emerge = (obs.emerge !== undefined) ? obs.emerge : 1;
 
             if (obs.risesFromGround && obs.x < obs.riseStartX + 36 && emerge < 0.995) {
-              // Grieta luminosa en el suelo anunciando y acompañando la salida de la lápida
               const crackAlpha = emerge < 0.01
                 ? Math.max(0, 1 - (obs.x - obs.riseStartX) / 36) * 0.75
                 : Math.min(1, (1 - emerge) * 1.6);
               if (crackAlpha > 0.03) {
-                ctx.save();
-                ctx.strokeStyle = 'rgba(168, 188, 245, ' + (crackAlpha * obsAlpha).toFixed(3) + ')';
+                ctx.globalAlpha = crackAlpha * obsAlpha;
+                ctx.strokeStyle = '#a8bcf5';
                 ctx.lineWidth = 2.2;
                 ctx.beginPath();
                 ctx.moveTo(obs.x - 4, groundY);
                 ctx.lineTo(obs.x + obs.w + 4, groundY);
                 ctx.stroke();
-                ctx.restore();
               }
             }
 
@@ -1904,6 +2022,7 @@ preloadSharedGameMusicApi();
               continue;
             }
 
+            ctx.globalAlpha = obsAlpha;
             if (emerge < 0.998) {
               const shudderX = Math.sin(blutuEgg.runTime * 52 + obs.phase) * 0.9 * (1 - emerge);
               ctx.save();
@@ -1920,20 +2039,18 @@ preloadSharedGameMusicApi();
             const batAnchor = (obs.anchorX !== undefined) ? obs.anchorX : obs.x;
 
             if (obs.descendsFromSky && batAnchor < obs.skyStartX + 34 && skyEmerge < 0.96) {
-              // Sutil bruma/halo nocturno en lo alto del cielo anunciando el descenso del murciélago
               const mistAlpha = skyEmerge < 0.01
                 ? Math.max(0, 1 - (batAnchor - obs.skyStartX) / 34) * 0.65
                 : Math.min(0.85, (1 - skyEmerge) * 1.35);
               if (mistAlpha > 0.03) {
                 const mistCx = obs.x + obs.w * 0.5;
-                ctx.save();
-                ctx.strokeStyle = 'rgba(168, 188, 245, ' + (mistAlpha * obsAlpha).toFixed(3) + ')';
+                ctx.globalAlpha = mistAlpha * obsAlpha;
+                ctx.strokeStyle = '#a8bcf5';
                 ctx.lineWidth = 2.0;
                 ctx.beginPath();
                 ctx.moveTo(mistCx - obs.w * 0.55, 1.2);
                 ctx.lineTo(mistCx + obs.w * 0.55, 1.2);
                 ctx.stroke();
-                ctx.restore();
               }
             }
 
@@ -1958,9 +2075,7 @@ preloadSharedGameMusicApi();
             const skyFade = obs.descendsFromSky ? Math.min(1, 0.25 + skyEmerge * 1.15) : 1;
 
             ctx.save();
-            if (skyFade < 0.999) {
-              ctx.globalAlpha = obsAlpha * skyFade;
-            }
+            ctx.globalAlpha = obsAlpha * skyFade;
             ctx.translate(cxBat, cyBat);
             if (obs.tilt) {
               ctx.rotate(obs.facingRight ? -obs.tilt : obs.tilt);
@@ -1969,21 +2084,25 @@ preloadSharedGameMusicApi();
             ctx.drawImage(batCanvas, -drawW * 0.5, -drawH * 0.5, drawW, drawH);
             ctx.restore();
 
-            // Ondas sutiles de ecolocalización nocturna al detectar al jugador
+            // Ondas sutiles de ecolocalización nocturna orientadas hacia donde avanza el murciélago
             if (obs.chirpAge !== undefined && obs.chirpAge >= 0 && obs.chirpAge <= 0.46) {
+              ctx.strokeStyle = '#b8ccff';
               for (let wIdx = 0; wIdx < 2; wIdx++) {
                 const localAge = obs.chirpAge - wIdx * 0.11;
                 if (localAge <= 0 || localAge > 0.35) continue;
                 const prog = localAge / 0.35;
                 const waveAlpha = (1 - prog) * 0.62 * obsAlpha;
+                if (waveAlpha <= 0.01) continue;
                 const radius = 5 + prog * 19;
-                ctx.save();
-                ctx.strokeStyle = 'rgba(184, 204, 255, ' + waveAlpha.toFixed(3) + ')';
+                ctx.globalAlpha = waveAlpha;
                 ctx.lineWidth = 1.25 - prog * 0.4;
                 ctx.beginPath();
-                ctx.arc(cxBat - obs.w * 0.14, cyBat + 1, radius, Math.PI * 0.77, Math.PI * 1.19);
+                if (obs.facingRight) {
+                  ctx.arc(cxBat + obs.w * 0.14, cyBat + 1, radius, -Math.PI * 0.19, Math.PI * 0.23);
+                } else {
+                  ctx.arc(cxBat - obs.w * 0.14, cyBat + 1, radius, Math.PI * 0.77, Math.PI * 1.19);
+                }
                 ctx.stroke();
-                ctx.restore();
               }
             }
           }
@@ -1991,7 +2110,34 @@ preloadSharedGameMusicApi();
         ctx.restore();
       }
 
-      // Monedas coleccionables en el camino (cada 200 puntos)
+      // Aviso sutil en el mismo borde por donde está por volver el murciélago
+      if (blutuEgg.state === 'PLAYING' && !blutuEgg.batActive && blutuEgg.obstacleCount >= 2 && blutuEgg.batCooldown > 0 && blutuEgg.batCooldown <= 0.38) {
+        const edgeProg = 1 - (blutuEgg.batCooldown / 0.38);
+        const isLeftReturn = (blutuEgg.batReturnSide === 'LEFT');
+        const edgeX = isLeftReturn ? 2 : (w - 2);
+        const edgeY = Math.max(16, Math.min(groundY - 40, blutuEgg.batEntryY || 24));
+        ctx.save();
+        ctx.strokeStyle = '#b8ccff';
+        ctx.lineWidth = 1.3;
+        for (let wIdx = 0; wIdx < 2; wIdx++) {
+          const localProg = Math.max(0, Math.min(1, (edgeProg - wIdx * 0.22) / 0.78));
+          if (localProg <= 0 || localProg >= 1) continue;
+          const arcAlpha = (1 - localProg) * 0.55;
+          if (arcAlpha <= 0.01) continue;
+          const arcRadius = 4 + localProg * 15;
+          ctx.globalAlpha = arcAlpha;
+          ctx.beginPath();
+          if (isLeftReturn) {
+            ctx.arc(edgeX, edgeY, arcRadius, -Math.PI * 0.26, Math.PI * 0.26);
+          } else {
+            ctx.arc(edgeX, edgeY, arcRadius, Math.PI * 0.74, Math.PI * 1.26);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // Monedas coleccionables en el camino (cada 200 puntos; usa sprite pre-renderizado de halo)
       if (blutuEgg.state === 'PLAYING' && blutuEgg.roadCoins.length > 0 && sprites.coinCruz && sprites.coinCara) {
         const coinPadRatio = sprites.coinPad / sprites.coinInner;
         for (let i = 0; i < blutuEgg.roadCoins.length; i++) {
@@ -2003,26 +2149,19 @@ preloadSharedGameMusicApi();
           const activeFace = cosT >= 0 ? sprites.coinCruz : sprites.coinCara;
           const rcDrawH = rc.diam * (1 + coinPadRatio * 2);
 
-          // Halo invitante alrededor de la moneda en el camino
-          ctx.save();
-          const auraGrad = ctx.createRadialGradient(rc.x, rc.y, rc.r * 0.15, rc.x, rc.y, rc.r * 1.65);
-          auraGrad.addColorStop(0, 'rgba(140, 162, 230, ' + (0.28 * pulse).toFixed(3) + ')');
-          auraGrad.addColorStop(1, 'rgba(140, 162, 230, 0)');
-          ctx.fillStyle = auraGrad;
-          ctx.beginPath();
-          ctx.arc(rc.x, rc.y, rc.r * 1.65, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
+          if (sprites.coinAura) {
+            const auraSize = rc.r * 3.3;
+            ctx.globalAlpha = pulse;
+            ctx.drawImage(sprites.coinAura, rc.x - auraSize * 0.5, rc.y - auraSize * 0.5, auraSize, auraSize);
+            ctx.globalAlpha = 1;
+          }
 
           if (absCos < 0.95) {
-            ctx.save();
-            ctx.translate(rc.x + sinT * 1.4, rc.y);
             ctx.strokeStyle = 'rgba(168, 188, 245, 0.72)';
             ctx.lineWidth = 1.25;
             ctx.beginPath();
-            ctx.ellipse(0, 0, Math.max(1.0, rc.r * absCos), rc.r, 0, 0, Math.PI * 2);
+            ctx.ellipse(rc.x + sinT * 1.4, rc.y, Math.max(1.0, rc.r * absCos), rc.r, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.restore();
           }
 
           ctx.save();
@@ -2079,7 +2218,7 @@ preloadSharedGameMusicApi();
       ctx.drawImage(sprites.logo, -totalDrawSize * 0.5, -totalDrawSize * 0.5, totalDrawSize, totalDrawSize);
       ctx.restore();
 
-      // Animación al recoger la moneda en el camino (sin pausar el juego): sube desde el punto recogido y despliega moneda(s) girando + "+200" o "200xN" + murciélagos
+      // Animación al recoger la moneda en el camino (cero shadowBlur ni gradientes en tiempo real; pool reutilizable de posiciones)
       if (blutuEgg.state === 'PLAYING' && blutuEgg.milestoneActive && sprites.coinCruz && sprites.coinCara) {
         const u = Math.min(1, blutuEgg.milestoneElapsed / blutuEgg.milestoneDuration);
         const fadeAlpha = u < 0.08 ? (u / 0.08) : (u > 0.84 ? Math.max(0, (1 - u) / 0.16) : 1);
@@ -2093,33 +2232,42 @@ preloadSharedGameMusicApi();
         const targetCx = w * 0.5;
         const spinProgress = 0.88 * u + 0.12 * (0.5 - 0.5 * Math.cos(u * Math.PI));
         const baseTheta = spinProgress * Math.PI * 2;
-        const coinCount = blutuEgg.milestoneIsThousand ? Math.max(5, blutuEgg.milestoneCoinCount || 5) : 1;
+        const coinCount = blutuEgg.milestoneIsThousand ? Math.min(15, Math.max(5, blutuEgg.milestoneCoinCount || 5)) : 1;
 
         let targetCy = (isCompact ? h * 0.30 : h * 0.31) - Math.sin(u * Math.PI) * 2.5;
         const origX = blutuEgg.milestoneOriginX !== undefined ? blutuEgg.milestoneOriginX : blutuEgg.playerX;
         const origY = blutuEgg.milestoneOriginY !== undefined ? blutuEgg.milestoneOriginY : (groundY - 26);
 
-        let cx = origX + (targetCx - origX) * flightEase;
+        const cx = origX + (targetCx - origX) * flightEase;
         let cy = origY + (targetCy - origY) * flightEase;
         let labelY = 0;
         let veilRx = 0;
         let veilRy = 0;
-        let batRefDiam = (isCompact ? 54 : 62) * popScale;
-        const coinPlacements = [];
+        const batRefDiam = (isCompact ? 54 : 62) * popScale;
+        const coinPlacements = blutuEgg.milestonePlacements;
+        let placementCount = 0;
+
+        const pushPlacement = (px, py, pdiam, ptheta) => {
+          let slot = coinPlacements[placementCount];
+          if (!slot) {
+            slot = { x: 0, y: 0, diam: 0, theta: 0 };
+            coinPlacements[placementCount] = slot;
+          }
+          slot.x = px;
+          slot.y = py;
+          slot.diam = pdiam;
+          slot.theta = ptheta;
+          placementCount++;
+        };
 
         if (!blutuEgg.milestoneIsThousand) {
           const coinDiam = (isCompact ? 54 : 62) * popScale;
           veilRx = coinDiam * 0.86;
           veilRy = veilRx;
           labelY = cy + coinDiam * 0.5 + (isCompact ? 13 : 15);
-          coinPlacements.push({
-            x: cx,
-            y: cy,
-            diam: coinDiam,
-            theta: baseTheta
-          });
+          pushPlacement(cx, cy, coinDiam, baseTheta);
         } else {
-          const rows = coinCount <= 5 ? 1 : (coinCount <= 10 ? 2 : (coinCount <= 15 ? 3 : Math.min(4, Math.ceil(coinCount / (isCompact ? 7 : 10)))));
+          const rows = coinCount <= 5 ? 1 : (coinCount <= 10 ? 2 : 3);
           const maxCols = Math.ceil(coinCount / rows);
           const availW = Math.max(180, w - (isCompact ? 52 : 96));
           const topSafeY = 18;
@@ -2127,7 +2275,7 @@ preloadSharedGameMusicApi();
           const availH = Math.max(46, bottomSafeY - topSafeY);
           const idealDiam = rows === 1
             ? (isCompact ? 36 : 44)
-            : (rows === 2 ? (isCompact ? 27 : 33) : (rows === 3 ? (isCompact ? 21 : 26) : (isCompact ? 18 : 22)));
+            : (rows === 2 ? (isCompact ? 27 : 33) : (isCompact ? 21 : 26));
           const singleDiam = Math.max(
             13,
             Math.min(idealDiam, availW / Math.max(1, maxCols * 1.12), availH / Math.max(1, rows * 1.02))
@@ -2159,12 +2307,12 @@ preloadSharedGameMusicApi();
               const arcDy = rows === 1 ? (normCol * normCol * 4.0 - 2.0) : (normCol * normCol * 2.0 - 1.0);
               const targetX = cx + (c - (rowLen - 1) * 0.5) * stepX;
               const targetY = rowBaseY + arcDy;
-              coinPlacements.push({
-                x: cx + (targetX - cx) * spread,
-                y: cy + (targetY - cy) * spread,
-                diam: singleDiam,
-                theta: baseTheta + normCol * 0.28 - r * 0.14
-              });
+              pushPlacement(
+                cx + (targetX - cx) * spread,
+                cy + (targetY - cy) * spread,
+                singleDiam,
+                baseTheta + normCol * 0.28 - r * 0.14
+              );
               idxCounter++;
             }
           }
@@ -2176,58 +2324,14 @@ preloadSharedGameMusicApi();
         }
 
         ctx.save();
-
-        // Velo sutil en la parte superior para resaltar las monedas sin tapar los obstáculos del suelo
-        ctx.save();
-        ctx.translate(cx, cy + 5);
-        ctx.scale(veilRx / Math.max(1, veilRy), 1);
-        const veilGrad = ctx.createRadialGradient(0, 0, veilRy * 0.12, 0, 0, veilRy);
-        veilGrad.addColorStop(0, 'rgba(5, 7, 13, ' + (0.28 * fadeAlpha).toFixed(3) + ')');
-        veilGrad.addColorStop(1, 'rgba(5, 7, 13, 0)');
-        ctx.fillStyle = veilGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, veilRy, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // Cada 1000 puntos: bandada viva de murciélagos saliendo desde DETRÁS de las monedas
-        if (blutuEgg.milestoneIsThousand && blutuEgg.milestoneBats.length > 0 && sprites.bats) {
-          const baseBatW = isCompact ? 32 : 38;
-          const baseBatH = isCompact ? 17 : 20;
-          const batPad = sprites.batPad;
-
-          for (let i = 0; i < blutuEgg.milestoneBats.length; i++) {
-            const mb = blutuEgg.milestoneBats[i];
-            if (mb.delay > 0) continue;
-
-            const dist = Math.hypot(mb.dx, mb.dy);
-            const emergeScale = Math.min(1, 0.30 + (dist / (batRefDiam * 0.54)) * 0.70);
-            const batAlpha = fadeAlpha * Math.min(1, mb.age / 0.11) * Math.max(0, 1 - Math.max(0, mb.age - 1.32) / 0.42);
-            if (batAlpha <= 0.02) continue;
-
-            const rawMbFlap = mb.flapPhase !== undefined ? mb.flapPhase : (mb.age * 17 + mb.phase * 2);
-            const frameIdx = Math.floor(rawMbFlap) % batFrameCount;
-            const isMbBlink = ((mb.age + (mb.blinkOffset || 0)) % 1.9) > 1.78;
-            const mbList = (isMbBlink && sprites.batsBlink) ? sprites.batsBlink : sprites.bats;
-            const batSprite = mbList[frameIdx] || sprites.bats[0];
-            const bw = (baseBatW + batPad * 2) * mb.scale * emergeScale;
-            const bh = (baseBatH + batPad * 2) * mb.scale * emergeScale;
-            const flapRad = (rawMbFlap / batFrameCount) * Math.PI * 2;
-            const bankAngle = Math.atan2(mb.vy, Math.abs(mb.vx) + 40) * (mb.vx >= 0 ? 0.55 : -0.55) + Math.sin(mb.age * 11 + mb.phase) * 0.09;
-
-            ctx.save();
-            ctx.globalAlpha = batAlpha;
-            ctx.translate(cx + mb.dx, cy + mb.dy);
-            ctx.rotate(bankAngle);
-            ctx.scale(1 + Math.sin(flapRad) * 0.04, 1 - Math.sin(flapRad) * 0.04);
-            ctx.drawImage(batSprite, -bw * 0.5, -bh * 0.5, bw, bh);
-            ctx.restore();
-          }
-        }
-
         ctx.globalAlpha = fadeAlpha;
 
-        for (let i = 0; i < coinPlacements.length; i++) {
+        if (sprites.milestoneVeil) {
+          ctx.drawImage(sprites.milestoneVeil, cx - veilRx, (cy + 5) - veilRy, veilRx * 2, veilRy * 2);
+        }
+
+        ctx.strokeStyle = 'rgba(140, 162, 230, 0.65)';
+        for (let i = 0; i < placementCount; i++) {
           const cp = coinPlacements[i];
           const cosT = Math.cos(cp.theta);
           const sinT = Math.sin(cp.theta);
@@ -2237,14 +2341,10 @@ preloadSharedGameMusicApi();
           const edgeShift = sinT * Math.max(1.2, cp.diam * 0.035);
 
           if (absCos < 0.96) {
-            ctx.save();
-            ctx.translate(cp.x + edgeShift, cp.y);
-            ctx.strokeStyle = 'rgba(140, 162, 230, 0.65)';
             ctx.lineWidth = Math.max(1.0, (1 - absCos) * (cp.diam > 50 ? 2.2 : 1.6));
             ctx.beginPath();
-            ctx.ellipse(0, 0, Math.max(1.0, cp.diam * 0.5 * absCos), cp.diam * 0.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(cp.x + edgeShift, cp.y, Math.max(1.0, cp.diam * 0.5 * absCos), cp.diam * 0.5, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.restore();
           }
 
           ctx.save();
@@ -2254,21 +2354,16 @@ preloadSharedGameMusicApi();
           ctx.restore();
         }
 
-        const milestoneLabel = blutuEgg.milestoneLabel || '+200';
-        const labelFontPx = blutuEgg.milestoneIsThousand
-          ? (isCompact ? 15 : 17)
-          : (isCompact ? 14 : 16);
-        ctx.font = '700 ' + labelFontPx + "px 'Cinzel', Georgia, serif";
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = blutuEgg.milestoneIsThousand ? 'rgba(140, 162, 230, 0.95)' : 'rgba(90, 116, 191, 0.9)';
-        ctx.shadowBlur = blutuEgg.milestoneIsThousand ? 12 : 9;
-        ctx.strokeStyle = 'rgba(90, 116, 191, 0.88)';
-        ctx.lineWidth = 2.4;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(milestoneLabel, cx, labelY);
-        ctx.fillStyle = '#eef3ff';
-        ctx.fillText(milestoneLabel, cx, labelY);
+        const labelSprite = blutuEgg.milestoneLabelSprite;
+        if (labelSprite && labelSprite.canvas) {
+          ctx.drawImage(
+            labelSprite.canvas,
+            cx - labelSprite.cssW * 0.5,
+            labelY - labelSprite.cssH * 0.5,
+            labelSprite.cssW,
+            labelSprite.cssH
+          );
+        }
 
         ctx.restore();
       }
@@ -2276,6 +2371,8 @@ preloadSharedGameMusicApi();
       // Al terminar la partida: monedas en trazos rebotando en el suelo según cuántas monedas ganó el jugador
       if (blutuEgg.state === 'GAME_OVER' && blutuEgg.bouncingCoins.length > 0 && sprites.coinCruz && sprites.coinCara) {
         const coinPadRatio = sprites.coinPad / sprites.coinInner;
+        ctx.strokeStyle = 'rgba(140, 162, 230, 0.6)';
+        ctx.lineWidth = 1.2;
         for (let i = 0; i < blutuEgg.bouncingCoins.length; i++) {
           const c = blutuEgg.bouncingCoins[i];
           if (c.delay > 0) continue;
@@ -2287,14 +2384,9 @@ preloadSharedGameMusicApi();
           const drawH = c.diam * (1 + coinPadRatio * 2);
 
           if (absCos < 0.95) {
-            ctx.save();
-            ctx.translate(c.x + sinT * 1.6, c.y);
-            ctx.strokeStyle = 'rgba(140, 162, 230, 0.6)';
-            ctx.lineWidth = 1.2;
             ctx.beginPath();
-            ctx.ellipse(0, 0, Math.max(1.0, c.r * absCos), c.r, 0, 0, Math.PI * 2);
+            ctx.ellipse(c.x + sinT * 1.6, c.y, Math.max(1.0, c.r * absCos), c.r, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.restore();
           }
 
           ctx.save();
@@ -2893,6 +2985,29 @@ preloadSharedGameMusicApi();
       qctx.stroke();
       qctx.restore();
 
+      // 5. Sprites pre-renderizados para halos radiales (evita createRadialGradient en cada fotograma)
+      const auraSize = 96;
+      const coinAura = document.createElement('canvas');
+      coinAura.width = auraSize;
+      coinAura.height = auraSize;
+      const actx = coinAura.getContext('2d');
+      const auraGrad = actx.createRadialGradient(auraSize * 0.5, auraSize * 0.5, auraSize * 0.04, auraSize * 0.5, auraSize * 0.5, auraSize * 0.5);
+      auraGrad.addColorStop(0, 'rgba(140, 162, 230, 0.28)');
+      auraGrad.addColorStop(1, 'rgba(140, 162, 230, 0)');
+      actx.fillStyle = auraGrad;
+      actx.fillRect(0, 0, auraSize, auraSize);
+
+      const veilSize = 128;
+      const milestoneVeil = document.createElement('canvas');
+      milestoneVeil.width = veilSize;
+      milestoneVeil.height = veilSize;
+      const vctx = milestoneVeil.getContext('2d');
+      const veilGrad = vctx.createRadialGradient(veilSize * 0.5, veilSize * 0.5, veilSize * 0.06, veilSize * 0.5, veilSize * 0.5, veilSize * 0.5);
+      veilGrad.addColorStop(0, 'rgba(5, 7, 13, 0.28)');
+      veilGrad.addColorStop(1, 'rgba(5, 7, 13, 0)');
+      vctx.fillStyle = veilGrad;
+      vctx.fillRect(0, 0, veilSize, veilSize);
+
       return {
         logo: logoCanvas,
         logoInner: logoInner,
@@ -2905,11 +3020,12 @@ preloadSharedGameMusicApi();
         coinCruz: coinCruz,
         coinCara: coinCara,
         coinInner: coinInner,
-        coinPad: coinPad
+        coinPad: coinPad,
+        coinAura: coinAura,
+        milestoneVeil: milestoneVeil
       };
     }
 
 window.initBlutuDinoEasterEgg = initBlutuDinoEasterEgg;
 window.destroyBlutuDinoEasterEgg = destroyBlutuDinoEasterEgg;
-window.pauseBlutuGameMusicTemporary = pauseBlutuGameMusicTemporary;
 

@@ -1,18 +1,6 @@
 /* Blutu — Motores de Minijuegos Bajo Demanda (Memorama 4x5 y 6x6)
    Solo se importa cuando el usuario abre o juega un minijuego y se destruye por completo al salir */
 import { buildDefaultGothicCardSvgDataUri, createDefaultGamesData } from "./data-defaults.js";
-import {
-  preloadSharedGameMusicApi,
-  startSharedGameMusic,
-  notifySharedGameUserGesture,
-  isSharedGameMusicActive,
-  isSharedGameMusicMuted,
-  registerSharedMuteButton,
-  stopAndDestroySharedGameMusic
-} from "./game-audio.js";
-
-// Pre-calentar la API de música sin reproducir ni crear reproductores aún cuando el módulo se importa al abrir el blog del juego
-preloadSharedGameMusicApi();
 
 let activeMiniGame = null;
 window.activeMiniGame = null;
@@ -33,15 +21,6 @@ function normHex(col) {
 }
 function btnStyleAttr(col) {
   return typeof window.computeGameButtonStyleAttr === "function" ? window.computeGameButtonStyleAttr(col) : "";
-}
-
-function buildMiniGameMuteButtonHTML(btnId) {
-  const muted = isSharedGameMusicMuted();
-  const label = muted ? "Activar música" : "Silenciar música";
-  const icon = muted
-    ? '<i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>'
-    : '<i class="fa-solid fa-volume-high" aria-hidden="true"></i>';
-  return `<button type="button" id="${escapeAttr(btnId)}" class="minigame-mute-btn${muted ? ' is-muted' : ''}" aria-label="${escapeAttr(label)}" aria-pressed="${muted ? 'true' : 'false'}" title="${escapeAttr(label)}" onclick="event.stopPropagation(); toggleSharedGameMute();">${icon}</button>`;
 }
 
 const VSPC_TURN_CSS_VARS = [
@@ -135,7 +114,7 @@ function syncMemoramaTurnWindowTheme(game) {
   }
 }
 
-export function destroyActiveMiniGame(keepAudioAlive = false) {
+export function destroyActiveMiniGame() {
   if (activeMiniGame) {
     activeMiniGame.destroyed = true;
     if (activeMiniGame.rafId) {
@@ -165,9 +144,6 @@ export function destroyActiveMiniGame(keepAudioAlive = false) {
     setActiveMiniGame(null);
   }
   clearMemoramaTurnWindowTheme();
-  if (!keepAudioAlive) {
-    stopAndDestroySharedGameMusic(false);
-  }
 }
 
 export function launchMiniGameFromBlog(gameType, mode) {
@@ -180,8 +156,7 @@ export function launchMiniGameFromBlog(gameType, mode) {
     window.destroyBlutuDinoEasterEgg();
   }
 
-  const alreadyPlayingMusic = isSharedGameMusicActive();
-  destroyActiveMiniGame(alreadyPlayingMusic);
+  destroyActiveMiniGame();
   window.__isMiniGameScreenOpen = true;
   if (typeof window.clearActiveBatParticles === "function") {
     window.clearActiveBatParticles();
@@ -199,13 +174,6 @@ export function launchMiniGameFromBlog(gameType, mode) {
     modalBox.scrollTop = 0;
   }
 
-  // Asegurar que la canción del Easter Egg esté activa durante la partida (sin reiniciarla bruscamente al pulsar Reintentar)
-  if (!alreadyPlayingMusic) {
-    startSharedGameMusic(modalBox || document.body, "minigameHudMuteBtn");
-  } else {
-    notifySharedGameUserGesture();
-  }
-
   if (gameType === "memorama") {
     window.currentGameBlogKey = "memorama";
     const resolvedMode = mode === "vspc" ? "vspc-hard" : mode;
@@ -218,7 +186,7 @@ export function launchMiniGameFromBlog(gameType, mode) {
 
 export function exitMiniGameVolver() {
   const returnKey = window.currentGameBlogKey;
-  destroyActiveMiniGame(false);
+  destroyActiveMiniGame();
   window.__isMiniGameScreenOpen = false;
   if (returnKey && window.gamesData && window.gamesData.blogs && window.gamesData.blogs[returnKey] && typeof window.openGameBlogModal === "function") {
     window.openGameBlogModal(returnKey);
@@ -337,12 +305,8 @@ function startMemoramaRuntime(mode) {
     `;
   }).join("");
 
-  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
-
   if (!isVsPc) {
-    // Modo Solo: Botón de silenciar arriba a la izquierda (opuesto a la X de cerrar) + Tiempo centrado abajo (sin contador de parejas)
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="blutu-minigame-stage">
         <div class="minigame-hud-bar is-solo-memorama">
           <div class="minigame-hud-stat is-center">
@@ -356,18 +320,24 @@ function startMemoramaRuntime(mode) {
       </div>
     `;
 
+    const soloTimerEl = document.getElementById("memHudTimer");
+    let lastSoloTenths = -1;
     const tickSolo = (now) => {
       if (!activeMiniGame || activeMiniGame !== game || game.destroyed) return;
-      const elapsed = now - game.startTime;
-      const timerEl = document.getElementById("memHudTimer");
-      if (timerEl) timerEl.textContent = formatMemoramaTime(elapsed);
+      if (!document.hidden && soloTimerEl) {
+        const elapsed = now - game.startTime;
+        const tenths = Math.floor(elapsed / 100);
+        if (tenths !== lastSoloTenths) {
+          lastSoloTenths = tenths;
+          soloTimerEl.textContent = formatMemoramaTime(elapsed);
+        }
+      }
       game.rafId = requestAnimationFrame(tickSolo);
     };
     game.rafId = requestAnimationFrame(tickSolo);
   } else {
     const diffBadge = isVsPcEasy ? "Fácil" : "Difícil";
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="blutu-minigame-stage">
         <div class="minigame-hud-bar is-vspc-memorama">
           <div class="minigame-hud-stat">
@@ -390,8 +360,6 @@ function startMemoramaRuntime(mode) {
     `;
     syncMemoramaTurnWindowTheme(game);
   }
-
-  registerSharedMuteButton("minigameHudMuteBtn");
 
   // Ajustar miniaturas recortadas al montar la rejilla
   requestAnimationFrame(() => {
@@ -418,7 +386,6 @@ function startMemoramaRuntime(mode) {
         if (ev.cancelable) ev.preventDefault();
       }
 
-      notifySharedGameUserGesture();
       handleMemoramaCardTap(idx);
     };
 
@@ -747,8 +714,8 @@ function finishMemoramaMatch(game, elapsedMs) {
   const userPairs = game.userPairs;
   const pcPairs = game.pcPairs;
 
-  // Liberar memoria de la partida terminada, manteniendo el indicador de pantalla de resultado y la música hasta que salga o reintente
-  destroyActiveMiniGame(true);
+  // Liberar memoria de la partida terminada, manteniendo el indicador de pantalla de resultado
+  destroyActiveMiniGame();
   window.__isMiniGameScreenOpen = true;
 
   const modalBody = document.getElementById("blogModalBody");
@@ -762,14 +729,12 @@ function finishMemoramaMatch(game, elapsedMs) {
   const retryStyle = btnStyleAttr(normHex(mem.retryBtnColor || "#4a63ab"));
   const backStyle = btnStyleAttr(normHex(mem.backBtnColor || "#1f2b4d"));
 
-  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
   const crestHTML = buildResultCardCrestHTML();
   const dividerHTML = `<div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>`;
 
   if (mode === "solo") {
     const timeStr = formatMemoramaTime(elapsedMs);
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage is-win-stage">
         <div class="minigame-result-card is-victory">
           ${buildVictoryBatsCorridorHTML("top", crestHTML)}
@@ -812,7 +777,6 @@ function finishMemoramaMatch(game, elapsedMs) {
     const bottomSlotHTML = didUserWin ? buildVictoryBatsCorridorHTML("bottom") : "";
 
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage${didUserWin ? " is-win-stage" : ""}">
         <div class="minigame-result-card ${cardTone}">
           ${topSlotHTML}
@@ -845,7 +809,6 @@ function finishMemoramaMatch(game, elapsedMs) {
       </div>
     `;
   }
-  registerSharedMuteButton("minigameHudMuteBtn");
 }
 
 /* ==================== MOTOR 6X6 (1 AL 36 — 40 SEGUNDOS) ==================== */
@@ -888,10 +851,8 @@ function startSixBySixRuntime(mode) {
 
   const sixCfg = window.gamesData.sixBySix;
   const finishStyle = btnStyleAttr(normHex(sixCfg.finishBtnColor || "#41599f"));
-  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
 
   modalBody.innerHTML = `
-    <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
     <div class="blutu-minigame-stage">
       <div class="minigame-hud-bar is-sixbysix-hud">
         <div class="minigame-hud-stat is-six-side">
@@ -924,8 +885,6 @@ function startSixBySixRuntime(mode) {
     </div>
   `;
 
-  registerSharedMuteButton("minigameHudMuteBtn");
-
   if (!isHard) {
     const gridEl = document.getElementById("sixBySixGridEl");
     if (gridEl) {
@@ -945,7 +904,6 @@ function startSixBySixRuntime(mode) {
           if (ev.cancelable) ev.preventDefault();
         }
 
-        notifySharedGameUserGesture();
         handleSixBySixCellTap(idx, num);
       };
 
@@ -959,14 +917,23 @@ function startSixBySixRuntime(mode) {
     }
   }
 
+  const sixTimerEl = document.getElementById("sixHudTimer");
+  let lastSixTimerText = "";
+  let wasSixDanger = false;
   const tickSix = (now) => {
     if (!activeMiniGame || activeMiniGame !== game || game.destroyed || game.finishing) return;
     const remainingMs = Math.max(0, game.durationMs - (now - game.startTime));
-    const timerEl = document.getElementById("sixHudTimer");
-    if (timerEl) {
-      const secs = (remainingMs / 1000).toFixed(1);
-      timerEl.textContent = `${secs} s`;
-      timerEl.classList.toggle("is-danger-time", remainingMs <= 10000);
+    if (!document.hidden && sixTimerEl) {
+      const secsText = `${(remainingMs / 1000).toFixed(1)} s`;
+      if (secsText !== lastSixTimerText) {
+        lastSixTimerText = secsText;
+        sixTimerEl.textContent = secsText;
+      }
+      const isDanger = remainingMs <= 10000;
+      if (isDanger !== wasSixDanger) {
+        wasSixDanger = isDanger;
+        sixTimerEl.classList.toggle("is-danger-time", isDanger);
+      }
     }
 
     if (remainingMs <= 0) {
@@ -1051,7 +1018,6 @@ export function handleSixBySixCellTap(cellIdx, num) {
 export function finishSixBySixHardManual() {
   const game = activeMiniGame;
   if (!game || game.destroyed || game.finishing || game.type !== "sixbysix") return;
-  notifySharedGameUserGesture();
   game.finishing = true;
   if (game.rafId) {
     cancelAnimationFrame(game.rafId);
@@ -1067,7 +1033,7 @@ function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
   const mode = game.mode;
   const reachedNum = game.highestReached;
 
-  destroyActiveMiniGame(true);
+  destroyActiveMiniGame();
   window.__isMiniGameScreenOpen = true;
 
   const modalBody = document.getElementById("blogModalBody");
@@ -1079,7 +1045,6 @@ function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
   const retryStyle = btnStyleAttr(normHex(six.retryBtnColor || "#4a63ab"));
   const backStyle = btnStyleAttr(normHex(six.backBtnColor || "#1f2b4d"));
 
-  const muteBtnHTML = buildMiniGameMuteButtonHTML("minigameHudMuteBtn");
   const crestHTML = buildResultCardCrestHTML();
   const dividerHTML = `<div class="minigame-card-divider" aria-hidden="true"><span>✠</span></div>`;
 
@@ -1102,7 +1067,6 @@ function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
       : `<h2 class="minigame-result-title is-big-score-num">${reachedNum}</h2>`;
 
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage${isWin ? " is-win-stage" : ""}">
         <div class="minigame-result-card ${cardTone}">
           ${topSlotHTML}
@@ -1121,7 +1085,6 @@ function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
     `;
   } else {
     modalBody.innerHTML = `
-      <div class="minigame-top-mute-wrap">${muteBtnHTML}</div>
       <div class="minigame-result-stage">
         <div class="minigame-result-card is-neutral">
           ${crestHTML}
@@ -1138,7 +1101,6 @@ function finishSixBySixMatch(game, completedAll, elapsedMs = 0) {
       </div>
     `;
   }
-  registerSharedMuteButton("minigameHudMuteBtn");
 }
 
 Object.assign(window, {

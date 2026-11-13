@@ -1486,7 +1486,6 @@
       transform: translate3d(-50%, -50%, 0);
       animation: batSparkleFly 0.72s cubic-bezier(0.2, 0.8, 0.4, 1) forwards;
       will-change: transform, opacity;
-      contain: layout style paint;
     }
 
     @keyframes batSparkleFly {
@@ -2228,9 +2227,6 @@
       font-family: 'Cormorant Garamond', serif;
       font-size: 1.05rem;
     }
-
-    #yt-player-container { position: fixed; left: 2px; bottom: 2px; width: 4px; height: 4px; opacity: 0.02; z-index: 2; pointer-events: none; overflow: hidden; }
-    #yt-player-container iframe, #yt-player { pointer-events: none !important; border: 0 !important; }
 
     footer { text-align: center; margin-top: 40px; padding: 20px; font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-color); }
 
