@@ -7354,7 +7354,8 @@ try {
         }
         closeModal();
         closeBlogModal();
-        document.getElementById('passwordModal').style.display = 'none';
+        const pm = document.getElementById('passwordModal');
+        if (pm) pm.style.display = 'none';
         closeAdminModal();
       }
     });
@@ -7374,7 +7375,10 @@ try {
         if (window.isUserAdmin) {
           openAdminPanel();
         } else {
-          document.getElementById('passwordModal').style.display = 'flex';
+          ensureAdminModalsReady().then(() => {
+            const pm = document.getElementById('passwordModal');
+            if (pm) pm.style.display = 'flex';
+          });
         }
       }
     });
@@ -7450,6 +7454,7 @@ try {
           };
         } else {
           descEl.contentEditable = 'false';
+          descEl.removeAttribute('title');
           descEl.style.border = 'none';
           descEl.style.padding = '0';
           descEl.style.background = 'transparent';
@@ -10307,20 +10312,34 @@ try {
     function toggleAdminMode(enable) {
       const adminCssLink = document.getElementById("blutuAdminStylesheet");
       if (adminCssLink && adminCssLink.media !== "all") adminCssLink.media = "all";
-      if ((enable === true || (enable === undefined && !isAdminMode)) && !window.__adminModalsMounted) {
-        ensureAdminModalsReady().then(() => {
-          if (typeof syncCartConfigInputsUI === "function") syncCartConfigInputsUI();
-        });
-      }
+      const wantEnable = enable === undefined ? !isAdminMode : Boolean(enable);
       const wasAdminBefore = Boolean(isAdminMode);
-      if (enable === undefined) {
-        isAdminMode = !isAdminMode;
-      } else {
-        isAdminMode = Boolean(enable);
-      }
 
-      if (isAdminMode && (!wasAdminBefore || !adminEditSessionBaseline)) {
-        captureAdminEditSessionBaseline();
+      if (wantEnable) {
+        if (!adminModalsModuleRef || !window.__adminModalsMounted) {
+          isAdminMode = true;
+          if (!wasAdminBefore || !adminEditSessionBaseline) {
+            captureAdminEditSessionBaseline();
+          }
+          ensureAdminModalsReady().then((mod) => {
+            if (!isAdminMode) return;
+            if (mod && typeof mod.ensureInlineAdminPanelsMounted === "function") {
+              mod.ensureInlineAdminPanelsMounted();
+            }
+            toggleAdminMode(true);
+            if (typeof syncCartConfigInputsUI === "function") syncCartConfigInputsUI();
+          });
+          return;
+        }
+        if (typeof adminModalsModuleRef.ensureInlineAdminPanelsMounted === "function") {
+          adminModalsModuleRef.ensureInlineAdminPanelsMounted();
+        }
+        isAdminMode = true;
+        if (!wasAdminBefore || !adminEditSessionBaseline) {
+          captureAdminEditSessionBaseline();
+        }
+      } else {
+        isAdminMode = false;
       }
 
       const banner = document.getElementById('adminModeBanner');
@@ -10447,6 +10466,11 @@ try {
         if (typeof window.renderCommentsListFromMemory === 'function') window.renderCommentsListFromMemory();
         if (typeof renderCartModal === 'function') renderCartModal();
         if (typeof syncLastVisibleTombstoneSection === 'function') syncLastVisibleTombstoneSection();
+        if (adminModalsModuleRef && typeof adminModalsModuleRef.unmountInlineAdminPanels === 'function') {
+          adminModalsModuleRef.unmountInlineAdminPanels();
+        } else if (typeof window.unmountInlineAdminPanels === 'function') {
+          window.unmountInlineAdminPanels();
+        }
       }
     }
 

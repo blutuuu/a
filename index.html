@@ -4,21 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="blutu-build-timestamp" content="1793159000000">
+  <meta name="blutu-build-timestamp" content="1793160000000">
 
   <!-- CONTROL DE CACHÉ ESTRICTO PARA NAVEGADORES INTEGRADOS (INSTAGRAM, FACEBOOK, WEBVIEW) -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
 
-  <title>Blutu</title>
-  <meta name="description" content="Sitio web de Blutu con sección de pensamientos, música y galerías">
+  <title>Blutu – Música, Pensamientos, Galerías y Merch Oficial</title>
+  <meta name="description" content="Sitio web oficial del proyecto musical Blutu. Escucha su música en plataformas digitales, explora galerías visuales, lee pensamientos y consigue merch oficial.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://blutu.org/">
-  <meta property="og:title" content="Blutu">
-  <meta property="og:description" content="Sitio web de Blutu con sección de pensamientos, música y galerías">
-  <meta property="og:url" content="https://blutu.org/">
   <meta property="og:type" content="website">
+  <meta property="og:locale" content="es_CO">
+  <meta property="og:site_name" content="Blutu">
+  <meta property="og:title" content="Blutu – Música, Pensamientos, Galerías y Merch Oficial">
+  <meta property="og:description" content="Sitio web oficial del proyecto musical Blutu. Escucha su música en plataformas digitales, explora galerías visuales, lee pensamientos y consigue merch oficial.">
+  <meta property="og:url" content="https://blutu.org/">
   <meta property="og:image" content="https://blutu.org/blutu_logo.png">
+  <meta property="og:image:alt" content="Logo oficial de Blutu">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Blutu – Música, Pensamientos, Galerías y Merch Oficial">
+  <meta name="twitter:description" content="Sitio web oficial del proyecto musical Blutu. Escucha su música en plataformas digitales, explora galerías visuales, lee pensamientos y consigue merch oficial.">
+  <meta name="twitter:image" content="https://blutu.org/blutu_logo.png">
+  <meta name="twitter:image:alt" content="Logo oficial de Blutu">
 
   <!-- ÍCONO EN LA PESTAÑA DEL NAVEGADOR (FAVICON) -->
   <link rel="icon" type="image/png" href="blutu_logo.png">
@@ -41,25 +50,51 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
   <!-- Hojas de estilo modulares de Blutu -->
-  <link rel="stylesheet" href="./styles/core.css?v=1793159000000">
-  <link rel="stylesheet" href="./styles/blog-comments.css?v=1793159000000">
-  <link rel="stylesheet" href="./styles/galleries-admin.css?v=1793159000000">
-  <link rel="stylesheet" href="./styles/merch-games.css?v=1793159000000" id="blutuMerchGamesStylesheet">
+  <link rel="stylesheet" href="./styles/core.css?v=1793160000000">
+  <link rel="stylesheet" href="./styles/blog-comments.css?v=1793160000000">
+  <link rel="stylesheet" href="./styles/galleries-admin.css?v=1793160000000">
+  <link rel="stylesheet" href="./styles/merch-games.css?v=1793160000000" id="blutuMerchGamesStylesheet">
 
   <!-- Datos estructurados Schema.org -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "MusicGroup",
-    "name": "Blutu",
-    "url": "https://blutu.org/",
-    "image": "https://blutu.org/blutu_logo.png",
-    "description": "Sitio web de Blutu con sección de pensamientos, música y galerías",
-    "sameAs": [
-      "https://www.youtube.com/@Blutuuuu",
-      "https://open.spotify.com/artist/0uzHl1TllXcfSTCCYMwJKk",
-      "https://www.instagram.com/blutuuuuuu",
-      "https://music.apple.com/us/artist/blutu/1223269133"
+    "@graph": [
+      {
+        "@type": "MusicGroup",
+        "@id": "https://blutu.org/#artist",
+        "name": "Blutu",
+        "url": "https://blutu.org/",
+        "mainEntityOfPage": "https://blutu.org/",
+        "image": "https://blutu.org/blutu_logo.png",
+        "logo": "https://blutu.org/blutu_logo.png",
+        "description": "Proyecto musical independiente Blutu. Música en plataformas digitales, pensamientos escritos, galerías visuales, conciertos y merch oficial.",
+        "inLanguage": "es",
+        "sameAs": [
+          "https://www.youtube.com/@Blutuuuu",
+          "https://music.youtube.com/channel/UCPndhocFEFcfPu0-Sudy40A",
+          "https://open.spotify.com/artist/0uzHl1TllXcfSTCCYMwJKk",
+          "https://music.apple.com/us/artist/blutu/1223269133",
+          "https://music.amazon.es/artists/B0DDVWK99J/blutu",
+          "https://tidal.com/artist/54892748/u",
+          "https://www.deezer.com/es/artist/278804411",
+          "https://on.soundcloud.com/ZqebpC6clw3mVLEyFO",
+          "https://www.instagram.com/blutuuuuuu",
+          "https://www.last.fm/es/user/blutuuu",
+          "https://letterboxd.com/blutu/"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://blutu.org/#website",
+        "url": "https://blutu.org/",
+        "name": "Blutu",
+        "description": "Sitio web oficial del proyecto musical Blutu: música, pensamientos, galerías y merch oficial.",
+        "inLanguage": "es",
+        "publisher": {
+          "@id": "https://blutu.org/#artist"
+        }
+      }
     ]
   }
   </script>
@@ -68,20 +103,8 @@
 
   <header>
     <h1>Blutu</h1>
-    <img src="blutu_logo.png" alt="Logo Blutu" class="header-logo" id="logoBtn" title="">
+    <img src="blutu_logo.png" alt="Logo oficial de Blutu" class="header-logo" id="logoBtn" title="">
   </header>
-
-  <!-- CONTROLES FLOTANTES GLOBALES DE MODO EDICIÓN (GUARDAR Y NO GUARDAR CAMBIOS) -->
-  <div id="adminModeBanner" class="admin-floating-controls" style="display: none;">
-    <button type="button" class="admin-icon-btn admin-icon-save" onclick="saveMasterAdminData()" title="Guardar todos los cambios y salir del Modo Edición">
-      <i class="fa-solid fa-floppy-disk"></i>
-      <span>Guardar cambios</span>
-    </button>
-    <button type="button" class="admin-icon-btn admin-icon-exit" onclick="discardMasterAdminData()" title="No guardar cambios y salir del Modo Edición">
-      <i class="fa-solid fa-xmark"></i>
-      <span>No guardar cambios</span>
-    </button>
-  </div>
 
   <div class="container">
 
@@ -91,17 +114,10 @@
       <!-- APARTADO CONCIERTOS -->
       <section class="tombstone-section is-collapsed" id="liveSection" style="display: none; --anim-color: #8ca2e6;">
         <div class="collapsible-header" onclick="toggleSectionCollapse('liveSection', this)" title="Haz clic para desplegar u ocultar">
-          <h2 style="margin: 0; text-align: center;">Conciertos <span id="liveSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
+          <h2 style="margin: 0; text-align: center;">Conciertos</h2>
         </div>
         <div class="collapsible-body" id="liveSectionBody">
-          <div id="inlineLiveAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 15px; margin-top: 5px; padding: 10px 14px;">
-            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; flex-wrap: wrap; gap: 8px;">
-              <span>⚙️ Configuración Conciertos</span>
-              <button type="button" class="admin-btn" onclick="addLiveButtonAdmin()" style="background: var(--accent-blue); color: #fff; border: none; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-weight: bold; font-family: 'Cormorant Garamond', serif; font-size: 0.95rem;">➕ Nuevo Botón</button>
-            </div>
-          </div>
-
-          <p style="font-size: 0.8rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px; display: block; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; padding: 0px; background: transparent; cursor: default; border-radius: 6px; outline: none; font-style: normal;" id="liveSectionDesc" contenteditable="false" title="Haz clic aquí para editar la descripción en tiempo real">Emisiones y transmisiones en directo</p>
+          <p style="font-size: 0.8rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px; display: block; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; padding: 0px; background: transparent; cursor: default; border-radius: 6px; outline: none; font-style: normal;" id="liveSectionDesc">Emisiones y transmisiones en directo</p>
 
           <div id="liveButtonsContainer" class="live-buttons-container"></div>
 
@@ -186,22 +202,9 @@
       <!-- SECCIÓN DE MERCH -->
       <section class="tombstone-section merch-panel is-collapsed" id="merchSection" style="display: block; --anim-color: #8ca2e6;">
         <div class="collapsible-header" onclick="toggleSectionCollapse('merchSection', this)" title="Haz clic para desplegar u ocultar">
-          <h2 style="margin: 0; text-align: center;">Merch <span id="merchSectionHiddenBadge" class="admin-hidden-badge" style="display: none;">Oculto</span></h2>
+          <h2 style="margin: 0; text-align: center;">Merch</h2>
         </div>
         <div class="collapsible-body" id="merchSectionBody">
-          <div id="inlineMerchAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
-            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
-              <span style="font-size: 0.85rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Edita textos y precios sobre las tarjetas o abre cualquier producto para gestionar sus fotos.</span>
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <button type="button" class="wysiwyg-tool-btn toggle-merch-section-btn" onclick="toggleMerchSectionGlobalVisibility()" title="Mostrar u ocultar toda la sección de Merch a visitantes" style="font-size: 0.78rem; padding: 4px 10px;">👁️‍🗨️ Visible</button>
-                <button type="button" class="wysiwyg-tool-btn" onclick="openCartConfigModal()" title="Configurar Instagram, WhatsApp y botones del carrito" style="font-size: 0.78rem; padding: 4px 10px;">🛒 Canales</button>
-                <button type="button" class="read-more-btn" onclick="createNewMerchInModal()" title="Crear Nuevo Producto" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
-                  ➕ Nuevo Producto
-                </button>
-              </div>
-            </div>
-          </div>
-
           <p style="font-size: 0.85rem; text-align: center; color: var(--text-muted); margin-bottom: 15px; margin-top: 10px; display: block;" id="merchSectionDesc">Con las tres B</p>
 
           <div class="merch-category-tabs" id="merchCategoryTabs" style="display: flex;"></div>
@@ -229,31 +232,6 @@
           <h2 style="margin: 0; text-align: center;">👁️</h2>
         </div>
         <div class="collapsible-body" id="gallerySectionBody">
-          <div id="inlineGalleryAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
-            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span style="font-size: 0.82rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Color pestaña:</span>
-                <input type="color" id="adminGalleryColor1" class="gallery-color-orb" value="#5A74BF" oninput="syncGalleryColorLive(1, this.value)" title="Color inicial del gradiente de esta galería">
-                <input type="color" id="adminGalleryColor2" class="gallery-color-orb" value="#28386B" oninput="syncGalleryColorLive(2, this.value)" title="Color final del gradiente de esta galería">
-                <button type="button" class="wysiwyg-tool-btn" onclick="moveGalleryOrder(-1)" title="Mover esta galería antes" style="padding: 3px 8px; font-size: 0.76rem;">◀</button>
-                <button type="button" class="wysiwyg-tool-btn" onclick="moveGalleryOrder(1)" title="Mover esta galería después" style="padding: 3px 8px; font-size: 0.76rem;">▶</button>
-                <button type="button" class="wysiwyg-tool-btn" onclick="setAsFirstGallery()" title="Fijar esta galería como la primera" style="padding: 3px 8px; font-size: 0.76rem;">⭐ 1ª</button>
-                <button type="button" id="btnDeleteCurrentGallery" class="wysiwyg-tool-btn is-danger" onclick="deleteCurrentGallery()" title="Eliminar la galería activa" style="padding: 3px 8px; font-size: 0.76rem;">🗑️ Galería</button>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <label title="Si está activo, extrae una única vez el color de aura de cada foto al subirla; desmárcalo para subir sin aura propia" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--accent-light); cursor: pointer; padding: 4px 8px; border: 1px solid rgba(90, 116, 191, 0.35); border-radius: 5px; background: rgba(5, 5, 8, 0.55); user-select: none;">
-                  <input type="checkbox" id="inlineGalleryAutoAuraCheckbox" checked style="width: 14px; height: 14px; accent-color: var(--accent-blue); cursor: pointer; margin: 0;">
-                  <span>✨ Aura al subir</span>
-                </label>
-                <input type="file" id="galleryPhotoFileInput" accept="image/*" multiple style="display: none;" onchange="handlePhotoFileUpload(event)">
-                <button type="button" class="wysiwyg-tool-btn" onclick="document.getElementById('galleryPhotoFileInput').click()" title="Subir fotos desde tu dispositivo" style="padding: 5px 11px; font-size: 0.78rem;">📤 Subir Fotos</button>
-                <button type="button" class="read-more-btn" onclick="openGalleryMediaModal('add')" title="Añadir foto o video de YouTube / Shorts por enlace" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
-                  ➕ URL / Video
-                </button>
-              </div>
-            </div>
-          </div>
-
           <div class="gallery-tabs" id="galleryTabsContainer"></div>
 
           <div class="carousel-container">
@@ -276,15 +254,6 @@
           <h2 style="margin: 0; text-align: center;">Pensamientos</h2>
         </div>
         <div class="collapsible-body" id="blogSectionBody">
-          <div id="inlineBlogAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 12px; margin-top: 4px; padding: 8px 14px; background: rgba(9, 11, 16, 0.65);">
-            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; gap: 10px; flex-wrap: wrap;">
-              <span style="font-size: 0.85rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Edita textos directamente sobre las tarjetas o abre cualquier publicación para editarla en vivo.</span>
-              <button type="button" class="read-more-btn" onclick="createNewBlogInModal()" title="Crear Nueva Publicación" style="padding: 5px 14px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
-                ➕ Nueva Publicación
-              </button>
-            </div>
-          </div>
-
           <div id="blogSliderWrapper" class="blog-slider-wrapper" style="margin-top: 8px;">
             <div id="blogSliderTrack" class="blog-slider-track" style="transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateX(0%);"></div>
           </div>
@@ -312,17 +281,9 @@
       <!-- SECCIÓN DE JUEGOS (CARGA BAJO DEMANDA SOLO AL INTERACTUAR) -->
       <section class="tombstone-section is-collapsed more-hidden-section" id="gamesSection" style="--anim-color: #8ca2e6;">
         <div class="collapsible-header" onclick="toggleSectionCollapse('gamesSection', this)" title="Haz clic para desplegar u ocultar" style="position: relative;">
-          <h2 style="margin: 0; text-align: center;">Juegos <span id="gamesSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
-          <button type="button" id="headerQuickToggleGamesBtn" class="wysiwyg-tool-btn toggle-games-section-btn" onclick="event.stopPropagation(); toggleGamesSectionVisibility();" title="Mostrar u ocultar la sección de Juegos a los visitantes" style="display: none; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 0.74rem; padding: 4px 9px; z-index: 4;">🙈 Ocultar</button>
+          <h2 style="margin: 0; text-align: center;">Juegos</h2>
         </div>
         <div class="collapsible-body" id="gamesSectionBody">
-          <div id="inlineGamesAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 10px; margin-top: 6px; padding: 10px 14px; background: rgba(9, 11, 16, 0.65);">
-            <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border-bottom: none; padding-bottom: 0; gap: 10px; flex-wrap: wrap;">
-              <span style="font-size: 0.86rem; color: var(--text-muted); font-family: 'Cormorant Garamond', serif; font-style: italic;">Toca "¿Por qué?", "Memorama" o "6x6" para editar su blog, imágenes de parejas y colores de botones.</span>
-              <button type="button" class="wysiwyg-tool-btn toggle-games-section-btn" onclick="toggleGamesSectionVisibility()" title="Mostrar u ocultar toda la sección de Juegos a visitantes" style="font-size: 0.8rem; padding: 5px 12px;">🙈 Ocultar sección</button>
-            </div>
-          </div>
-
           <div id="gamesSectionContentWrap">
             <div class="games-why-wrap">
               <button type="button" id="gamesWhyLinkBtn" class="games-why-link" onclick="triggerGameBlogOpen('why', this)">¿Por qué?</button>
@@ -335,23 +296,10 @@
       <!-- SECCIÓN DE MURO DE VISITAS EN TIEMPO REAL -->
       <section class="tombstone-section is-collapsed more-hidden-section" id="commentsSection" style="--anim-color: #8ca2e6;">
         <div class="collapsible-header" onclick="toggleSectionCollapse('commentsSection', this)" title="Haz clic para desplegar u ocultar">
-          <h2 style="margin: 0; text-align: center;">Muro de visitas <span id="buzonSectionHiddenBadge" class="section-hidden-badge" style="display: none; font-size: 0.75rem; vertical-align: middle; margin-left: 8px; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 2px 6px; border-radius: 4px; background: rgba(255,107,107,0.15);">[Oculto]</span></h2>
+          <h2 style="margin: 0; text-align: center;">Muro de visitas</h2>
         </div>
         <div class="collapsible-body" id="commentsSectionBody">
           <div class="comments-container">
-            <div id="inlineCommentsAdmin" class="inline-admin-panel" style="display: none; margin-bottom: 15px; margin-top: 5px; padding: 10px 14px;">
-              <div class="inline-admin-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; flex-wrap: wrap; gap: 8px;">
-                <span>⚙️ Configuración del Muro de visitas</span>
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.88rem; cursor: pointer; color: var(--accent-light);">
-                  <input type="checkbox" id="inlineBuzonVisibleCheckbox" onchange="toggleBuzonVisibility(this.checked)" checked style="cursor: pointer;">
-                  <span>Mostrar sección a los visitantes</span>
-                </label>
-              </div>
-              <p style="font-size: 0.8rem; color: var(--text-muted); margin: 6px 0 0 0;">
-                En modo edición puedes ocultar o mostrar mensajes individuales haciendo clic en el botón <strong>"🚫 Ocultar"</strong> de cada tarjeta.
-              </p>
-            </div>
-
             <div class="comments-form-card">
               <form id="commentSubmitForm" onsubmit="event.preventDefault(); window.submitVisitorComment &amp;&amp; window.submitVisitorComment();">
                 <div class="comment-input-group">
@@ -419,18 +367,6 @@
     <div class="modal-caption" id="modalCaption"></div>
   </div>
 
-  <!-- MODAL DE ENTRADA A MODO ADMINISTRADOR (SOLO BOTÓN DE GOOGLE) -->
-  <div id="passwordModal" style="display: none; align-items: center; justify-content: center; position: fixed; inset: 0; background: rgba(5, 5, 8, 0.82); backdrop-filter: blur(8px); z-index: 99999;" onclick="if(event.target===this) closePasswordModal()">
-    <div style="background: rgba(13, 15, 20, 0.96); padding: 18px; border: 1px solid var(--accent-light); border-radius: 50%; box-shadow: 0 0 35px rgba(90, 116, 191, 0.55); display: flex; align-items: center; justify-content: center;">
-      <button type="button" id="googleAdminAuthBtn" onclick="handleGoogleSignIn()" style="background: #ffffff; border: none; width: 68px; height: 68px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.6); transition: all 0.25s ease;" onmouseover="this.style.transform='scale(1.1)'; this.style.boxShadow='0 0 30px rgba(255,255,255,0.85)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 20px rgba(0,0,0,0.6)';" title="Continuar con Google">
-        <svg width="34" height="34" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <!-- PANEL ADMINISTRADOR Y MODALES DE EDICIÓN (MONTADOS BAJO DEMANDA) -->
-  <div id="adminModal" class="modal" onclick="if(event.target===this) closeAdminModal()" style="display: none;"></div>
-
   <!-- MODAL DE DETALLE DE PRODUCTO DE MERCH -->
   <div id="merchDetailModal" class="modal" onclick="if(event.target.id==='merchDetailModal') closeMerchModal()" style="display: none; z-index: 3000;">
     <div class="blog-modal-box" style="max-width: 650px;">
@@ -463,9 +399,6 @@
           <span class="blutu-cart-icon" style="width: 24px; height: 24px;"></span> Carrito de Compras
         </h2>
         <p class="cart-header-subtitle">Selección de merch oficial de Blutu</p>
-        <div id="cartModalAdminConfigWrap" style="display: none; margin-top: 8px;">
-          <button type="button" class="wysiwyg-tool-btn" onclick="openCartConfigModal()" style="font-size: 0.78rem; padding: 4px 12px;">⚙️ Configurar Canales y Botones</button>
-        </div>
       </div>
 
       <div id="cartItemsContainer" class="cart-items-list">
@@ -506,6 +439,6 @@
     <p><span id="adminTrigger" style="user-select: none;">© Blutu. 20XX</span></p>
   </footer>
 
-  <script type="module" src="./js/main.js?v=1793159000000"></script>
+  <script type="module" src="./js/main.js?v=1793160000000"></script>
 </body>
 </html>
